@@ -50,6 +50,8 @@ The preview is updated on every PR push and removed when the PR is closed.
 
 If the root URL shows a GitHub Pages 404, run or merge the main Pages deployment first. The preview URL itself must include `/pr-preview/pr-<PR_NUMBER>/`.
 
+If the PR preview workflow logs `Timed out waiting for build to start`, the preview files were still pushed to `gh-pages`; GitHub Pages just did not report a matching deployment in time. Wait a minute and open the preview URL directly.
+
 ## Run With Docker
 
 ```bash
