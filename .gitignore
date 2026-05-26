@@ -3,3 +3,5 @@ data/*
 !data/.gitkeep
 .DS_Store
 npm-debug.log
+docs/erd.md
+docs/google-apps-script-setup-guide.md

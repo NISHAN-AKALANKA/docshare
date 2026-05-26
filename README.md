@@ -24,6 +24,12 @@ Setup guide:
 docs/google-apps-script-setup.md
 ```
 
+ERD:
+
+```text
+docs/erd.md
+```
+
 ## Run With Docker
 
 ```bash

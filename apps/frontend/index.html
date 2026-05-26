@@ -64,7 +64,7 @@ const DRIVE="https://drive.google.com/drive/folders/1GS_pPVVEaw1-YmuXYxPrHYATZuU
 const GAS_WEB_APP_URL="https://script.google.com/macros/s/AKfycbxQkZ1f6Bp7oQaXkT35GHsAJrP7JyT3uCGcr3ElN6l3uL7dFq4516Df8kPKi2js7RA/exec";
 const SK="de_batt_lms_v4";
 const SSK="de_batt_sess_v4";
-const EMPTY_STATE={inL:[],outL:[],inC:1,outC:1};
+const EMPTY_STATE={inL:[],outL:[],notifications:[],inC:1,outC:1};
 
 let USERS=[
   {u:"DE",d:"Divisional Engineer",r:"DE"},
@@ -109,6 +109,7 @@ async function api(action,payload={}){
 async function bootstrap(){const data=await api('bootstrap');return data.state||EMPTY_STATE;}
 async function ldS(){return bootstrap();}
 async function svS(s){const data=await api('saveState',{state:s});return data.state||s;}
+async function markNotificationsRead(username){const data=await api('markNotificationsRead',{username});return data.state||EMPTY_STATE;}
 function ldSess(){try{const s=localStorage.getItem(SSK);if(s)return JSON.parse(s);}catch{}return null;}
 function svSess(u){try{u?localStorage.setItem(SSK,JSON.stringify(u)):localStorage.removeItem(SSK);}catch{}}
 function mkRef(t,c){const d=new Date();return`DEO_Batt_${String(d.getFullYear()).slice(2)}_${String(d.getMonth()+1).padStart(2,'0')}_${String(d.getDate()).padStart(2,'0')}_${t}_${String(c).padStart(2,'0')}`;}
@@ -178,7 +179,9 @@ function LoginPage({onLogin}){
   </div>;
 }
 
-function TopNav({user,page,setPage,onLogout}){
+function TopNav({user,page,setPage,onLogout,notifications,onMarkNotificationsRead}){
+  const [showN,setShowN]=useState(false);
+  const unread=notifications.filter(n=>!n.read).length;
   const isAdmin=['DE','CC'].includes(user.r);
   const tabs=[{id:'dash',l:'🏠 Dashboard'},{id:'in',l:'📥 In Letters'},...(!['STO','TO'].includes(user.r)?[{id:'out',l:'📤 Out Letters'}]:[]),...(isAdmin?[{id:'rep',l:'📊 Reports'}]:[])];
   return <div style={{background:'linear-gradient(to right,#001f5b,#003580)',boxShadow:'0 2px 10px rgba(0,0,0,.2)',position:'sticky',top:0,zIndex:100}}>
@@ -192,11 +195,30 @@ function TopNav({user,page,setPage,onLogout}){
         <div style={{color:'#fff',fontSize:12,fontWeight:600}}>{user.d}</div>
         <div style={{color:'rgba(255,255,255,.5)',fontSize:11}}>{user.r} · {user.u}</div>
       </div>
+      <button className="btn" style={{background:'rgba(255,255,255,.12)',border:'1px solid rgba(255,255,255,.2)',color:'#fff',fontSize:12,position:'relative'}} onClick={()=>setShowN(true)}>
+        🔔
+        {unread>0&&<span style={{position:'absolute',top:-7,right:-7,background:'#e74c3c',color:'#fff',borderRadius:20,fontSize:10,fontWeight:800,minWidth:18,padding:'2px 5px'}}>{unread}</span>}
+      </button>
       <button className="btn" style={{background:'rgba(255,255,255,.12)',border:'1px solid rgba(255,255,255,.2)',color:'#fff',fontSize:12}} onClick={onLogout}>Logout</button>
     </div>
     <div style={{display:'flex',padding:'0 18px'}}>
       {tabs.map(t=><button key={t.id} className={`nb${page===t.id?' act':''}`} onClick={()=>setPage(t.id)}>{t.l}</button>)}
     </div>
+    {showN&&<Mod title="Notifications" onClose={()=>setShowN(false)}>
+      {notifications.length===0?<div style={{textAlign:'center',color:'#aaa',padding:30}}>No notifications.</div>:
+        <div style={{display:'grid',gap:8}}>
+          {notifications.slice(0,30).map(n=><div key={n.id} style={{border:'1px solid #e5e8f0',borderRadius:6,padding:'10px 12px',background:n.read?'#fff':'#f0f7ff'}}>
+            <div style={{display:'flex',justifyContent:'space-between',gap:10}}>
+              <strong style={{fontSize:13,color:'#003580'}}>{n.title}</strong>
+              <span style={{fontSize:11,color:'#888',whiteSpace:'nowrap'}}>{fdt(n.createdAt)}</span>
+            </div>
+            <div style={{fontSize:13,color:'#444',marginTop:3}}>{n.message}</div>
+          </div>)}
+        </div>}
+      {unread>0&&<div className="fr" style={{justifyContent:'flex-end',marginTop:13}}>
+        <button className="btn bp bsm" onClick={()=>onMarkNotificationsRead()}>Mark All Read</button>
+      </div>}
+    </Mod>}
   </div>;
 }
 
@@ -211,13 +233,13 @@ function SCard({label,value,color,onClick}){
 }
 
 function UpInForm({user,onClose,state,onSave}){
-  const [f,sf]=useState({dr:'',from:'',fromO:'',to:'',toO:'',subj:'',desc:'',asgn:[]});
+  const [f,sf]=useState({ref:'',dr:'',from:'',fromO:'',to:'',toO:'',subj:'',desc:'',asgn:[]});
   const [fl,,hf]=useFile();
   const set=(k,v)=>sf(x=>({...x,[k]:v}));
   const tog=u=>sf(x=>({...x,asgn:x.asgn.includes(u)?x.asgn.filter(a=>a!==u):[...x.asgn,u]}));
   const sub=()=>{
     if(!f.dr||!f.from||!f.subj){alert('Fill required fields.');return;}
-    const ref=mkRef('In',state.inC);
+    const ref=f.ref.trim()||mkRef('In',state.inC);
     const frm=f.from==='Others'?f.fromO:f.from;
     const to=f.to==='Others'?f.toO:f.to;
     const asgn=f.asgn.map(u=>({u,d:USERS.find(x=>x.u===u).d,s:'pending',seen:null}));
@@ -226,6 +248,7 @@ function UpInForm({user,onClose,state,onSave}){
   };
   return <div>
     <div className="g2">
+      <div className="fg"><label className="flb">Reference No</label><input className="fi" value={f.ref} onChange={e=>set('ref',e.target.value)} placeholder={mkRef('In',state.inC)}/></div>
       <div className="fg"><label className="flb">Date Received *</label><input type="date" className="fi" value={f.dr} onChange={e=>set('dr',e.target.value)}/></div>
       <div className="fg"><label className="flb">To</label>
         <select className="fi" value={f.to} onChange={e=>set('to',e.target.value)}><option value="">-- Select --</option>{TO_OPTS.map(o=><option key={o}>{o}</option>)}</select>
@@ -252,17 +275,18 @@ function UpInForm({user,onClose,state,onSave}){
 }
 
 function UpOutForm({user,onClose,state,onSave}){
-  const [f,sf]=useState({ds:'',subj:'',to:'',toO:'',desc:''});
+  const [f,sf]=useState({ref:'',ds:'',subj:'',to:'',toO:'',desc:''});
   const [fl,,hf]=useFile();
   const set=(k,v)=>sf(x=>({...x,[k]:v}));
   const sub=()=>{
     if(!f.ds||!f.subj||!f.to){alert('Fill required fields.');return;}
-    const ref=mkRef('Out',state.outC);
+    const ref=f.ref.trim()||mkRef('Out',state.outC);
     onSave({id:crypto.randomUUID(),ref,ds:f.ds,du:new Date().toISOString(),by:user.u,from:'DE Battaramulla',to:f.to==='Others'?f.toO:f.to,subj:f.subj,desc:f.desc,fd:fl?.data,fn:fl?.name,ft:fl?.type});
     onClose();
   };
   return <div>
     <div className="g2">
+      <div className="fg"><label className="flb">Reference No</label><input className="fi" value={f.ref} onChange={e=>set('ref',e.target.value)} placeholder={mkRef('Out',state.outC)}/></div>
       <div className="fg"><label className="flb">Date Sent *</label><input type="date" className="fi" value={f.ds} onChange={e=>set('ds',e.target.value)}/></div>
       <div className="fg"><label className="flb">From</label><input className="fi" value="DE Battaramulla" readOnly style={{background:'#f5f5f5',color:'#888'}}/></div>
       <div className="fg" style={{gridColumn:'span 2'}}><label className="flb">To *</label>
@@ -575,12 +599,18 @@ function App(){
   const addIn=l=>sv({...state,inL:[...state.inL,l],inC:state.inC+1});
   const updIn=(id,p)=>sv({...state,inL:state.inL.map(l=>l.id===id?{...l,...p}:l)});
   const addOut=l=>sv({...state,outL:[...state.outL,l],outC:state.outC+1});
+  const myNotifications=(state.notifications||[]).filter(n=>user&&n.username===user.u);
+  const markMyNotifications=async()=>{
+    if(!user)return;
+    try{const saved=await markNotificationsRead(user.u);setState({...EMPTY_STATE,...saved});setErr('');}
+    catch{setErr('Could not update notifications. Check the Apps Script deployment.');}
+  };
   const login=u=>{setUser(u);svSess(u);setPage('dash');};
   const logout=()=>{setUser(null);svSess(null);setPage('dash');};
   if(!user)return <LoginPage onLogin={login}/>;
   if(loading)return <div style={{minHeight:'100vh',display:'flex',alignItems:'center',justifyContent:'center',background:'#f0f2f7',color:'#003580',fontWeight:800}}>Loading shared data...</div>;
   return <div style={{minHeight:'100vh',background:'#f0f2f7'}}>
-    <TopNav user={user} page={page} setPage={p=>{setPage(p);setFS(undefined);}} onLogout={logout}/>
+    <TopNav user={user} page={page} setPage={p=>{setPage(p);setFS(undefined);}} onLogout={logout} notifications={myNotifications} onMarkNotificationsRead={markMyNotifications}/>
     <div style={{maxWidth:1280,margin:'0 auto',padding:'18px 14px'}}>
       {err&&<div className="ab ae">{err}</div>}
       <div style={{background:'#fff',borderRadius:10,boxShadow:'0 2px 12px rgba(0,0,0,.08)',padding:'20px 22px',minHeight:400}}>

@@ -11,6 +11,7 @@ const SHEETS = {
   incoming: ['id', 'ref', 'dr', 'du', 'by', 'from', 'to', 'subj', 'desc', 'fileId', 'fileName', 'fileType', 'fileUrl', 'status', 'note', 'deAt'],
   outgoing: ['id', 'ref', 'ds', 'du', 'by', 'from', 'to', 'subj', 'desc', 'fileId', 'fileName', 'fileType', 'fileUrl'],
   assignments: ['letterId', 'username', 'displayName', 'status', 'seen'],
+  notifications: ['id', 'username', 'title', 'message', 'letterId', 'ref', 'type', 'read', 'createdAt'],
 };
 
 const DEFAULT_USERS = [
@@ -58,6 +59,7 @@ function doPost(e) {
     if (action === 'bootstrap') return json_({ users: publicUsers_(), state: readState_() });
     if (action === 'getState') return json_(readState_());
     if (action === 'saveState') return json_(saveState_(payload.state));
+    if (action === 'markNotificationsRead') return json_(markNotificationsRead_(payload.username));
 
     return json_({ ok: false, error: 'Unknown action' });
   } catch (error) {
@@ -83,6 +85,7 @@ function readState_() {
   const incomingRows = readObjects_(ss.getSheetByName('incoming'));
   const outgoingRows = readObjects_(ss.getSheetByName('outgoing'));
   const assignments = readObjects_(ss.getSheetByName('assignments'));
+  const notifications = readObjects_(ss.getSheetByName('notifications'));
   const settings = settingsMap_(ss);
 
   const asgnByLetter = assignments.reduce((map, row) => {
@@ -136,6 +139,17 @@ function readState_() {
   return {
     inL,
     outL,
+    notifications: notifications.map(row => ({
+      id: row.id,
+      username: row.username,
+      title: row.title,
+      message: row.message,
+      letterId: row.letterId,
+      ref: row.ref,
+      type: row.type,
+      read: String(row.read).toUpperCase() === 'TRUE',
+      createdAt: row.createdAt,
+    })).sort((a, b) => String(b.createdAt).localeCompare(String(a.createdAt))),
     inC: Number(settings.IN_COUNTER || nextCounter_(inL, 'In')),
     outC: Number(settings.OUT_COUNTER || nextCounter_(outL, 'Out')),
   };
@@ -147,9 +161,14 @@ function saveState_(state) {
   }
 
   const ss = getSpreadsheet_();
+  const previous = readState_();
   const incoming = state.inL.map(letter => normalizeIncoming_(letter));
   const outgoing = state.outL.map(letter => normalizeOutgoing_(letter));
   const assignments = [];
+  const notifications = [
+    ...readObjects_(ss.getSheetByName('notifications')),
+    ...buildNotifications_(previous, { inL: incoming, outL: outgoing }),
+  ];
 
   incoming.forEach(letter => {
     (letter.asgn || []).forEach(item => {
@@ -193,10 +212,83 @@ function saveState_(state) {
   })));
 
   writeRows_(ss.getSheetByName('assignments'), assignments);
+  writeObjects_(ss.getSheetByName('notifications'), notifications);
   setSetting_(ss, 'IN_COUNTER', String(state.inC || nextCounter_(incoming, 'In')));
   setSetting_(ss, 'OUT_COUNTER', String(state.outC || nextCounter_(outgoing, 'Out')));
 
   return { ok: true, state: readState_() };
+}
+
+function markNotificationsRead_(username) {
+  const normalized = String(username || '').trim().toUpperCase();
+  const ss = getSpreadsheet_();
+  const notifications = readObjects_(ss.getSheetByName('notifications')).map(row => ({
+    ...row,
+    read: String(row.username || '').toUpperCase() === normalized ? 'TRUE' : row.read,
+  }));
+
+  writeObjects_(ss.getSheetByName('notifications'), notifications);
+  return { ok: true, state: readState_() };
+}
+
+function buildNotifications_(previous, next) {
+  const previousLetters = new Map((previous.inL || []).map(letter => [letter.id, letter]));
+  const nextLetters = new Map((next.inL || []).map(letter => [letter.id, letter]));
+  const items = [];
+
+  next.inL.forEach(letter => {
+    const old = previousLetters.get(letter.id);
+    if (!old) {
+      if (letter.status === 'pending_de') {
+        items.push(notification_('DE', 'New letter pending review', `${letter.ref} - ${letter.subj}`, letter, 'pending_review'));
+      }
+      if (letter.status === 'de_reviewed') {
+        (letter.asgn || []).forEach(item => {
+          items.push(notification_(item.u, 'New letter assigned', `${letter.ref} - ${letter.subj}`, letter, 'assigned'));
+        });
+      }
+      return;
+    }
+
+    if (old.status === 'pending_de' && letter.status === 'de_reviewed') {
+      (letter.asgn || []).forEach(item => {
+        items.push(notification_(item.u, 'Letter approved and assigned', `${letter.ref} - ${letter.subj}`, letter, 'approved'));
+      });
+    }
+
+    const oldAssignments = new Map((old.asgn || []).map(item => [item.u, item]));
+    (letter.asgn || []).forEach(item => {
+      const oldItem = oldAssignments.get(item.u);
+      if (!oldItem) {
+        items.push(notification_(item.u, 'New assignment', `${letter.ref} - ${letter.subj}`, letter, 'assigned'));
+      } else if (oldItem.s !== item.s) {
+        items.push(notification_('DE', 'Task status updated', `${item.d} marked ${letter.ref} as ${item.s}`, letter, 'status'));
+      }
+    });
+  });
+
+  (next.outL || []).forEach(letter => {
+    if (!previous.outL.find(item => item.id === letter.id)) {
+      items.push(notification_('DE', 'Outgoing letter recorded', `${letter.ref} - ${letter.subj}`, letter, 'outgoing'));
+      items.push(notification_('CC', 'Outgoing letter recorded', `${letter.ref} - ${letter.subj}`, letter, 'outgoing'));
+    }
+  });
+
+  return items;
+}
+
+function notification_(username, title, message, letter, type) {
+  return {
+    id: Utilities.getUuid(),
+    username,
+    title,
+    message,
+    letterId: letter.id,
+    ref: letter.ref,
+    type,
+    read: 'FALSE',
+    createdAt: new Date().toISOString(),
+  };
 }
 
 function normalizeIncoming_(letter) {
