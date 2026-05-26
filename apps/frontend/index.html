@@ -53,6 +53,7 @@ tr:hover td{background:#e8f0fd}
 .g2{display:grid;grid-template-columns:1fr 1fr;gap:13px}
 .fr{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
 .na{background:#f0f7ff;border:1px solid #b3d4ff;border-radius:8px;padding:13px;margin-top:13px}
+.toast{position:fixed;right:18px;bottom:18px;z-index:2000;background:#0f7b53;color:#fff;border-radius:8px;padding:11px 14px;box-shadow:0 10px 30px rgba(0,0,0,.22);font-size:13px;font-weight:700;max-width:min(360px,calc(100vw - 36px))}
 </style>
 </head>
 <body>
@@ -138,11 +139,17 @@ function FView({fd:fdata,fn,ft,fileUrl}){
   return <div style={{marginTop:11,border:'1px solid #ddd',borderRadius:6,overflow:'hidden'}}>
     {ft?.startsWith('image/')&&<img src={src} alt={fn} style={{maxWidth:'100%',display:'block'}}/>}
     {ft==='application/pdf'&&<iframe src={src} style={{width:'100%',height:380,border:'none'}} title={fn}/>}
+    {ft&&!ft.startsWith('image/')&&ft!=='application/pdf'&&<div style={{padding:14,fontSize:13,color:'#666',background:'#fafafa'}}>Preview is not available for this file type.</div>}
     <div style={{padding:'7px 12px',background:'#f5f5f5',display:'flex',gap:10,alignItems:'center'}}>
       <span style={{fontSize:12,color:'#555'}}>📎 {fn}</span>
       <a href={src} download={fn} style={{color:'#005bb5',fontSize:12,fontWeight:600,textDecoration:'none'}}>⬇ Download</a>
     </div>
   </div>;
+}
+function Toast({message,onClose}){
+  useEffect(()=>{if(!message)return;const t=setTimeout(onClose,3200);return()=>clearTimeout(t);},[message]);
+  if(!message)return null;
+  return <div className="toast">{message}</div>;
 }
 function useFile(){
   const [f,sf]=useState(null);
@@ -262,6 +269,7 @@ function UpInForm({user,onClose,state,onSave}){
     </div>
     <div className="fg"><label className="flb">Description</label><textarea className="fi" style={{height:65,resize:'vertical'}} value={f.desc} onChange={e=>set('desc',e.target.value)}/></div>
     <div className="fg"><label className="flb">Attach File</label><input type="file" onChange={hf} accept="image/*,.pdf,.doc,.docx" style={{marginTop:4}}/>{fl&&<div style={{fontSize:12,color:'#27ae60',marginTop:4}}>✅ {fl.name}</div>}</div>
+    {fl&&<FView fd={fl.data} fn={fl.name} ft={fl.type}/>}
     {user.r==='DE'&&<div className="fg"><label className="flb">Assign To</label>
       <div style={{display:'flex',flexWrap:'wrap',marginTop:5}}>
         {ASSIGNABLE.map(a=><label key={a.u} className={`at${f.asgn.includes(a.u)?' sel':''}`}><input type="checkbox" checked={f.asgn.includes(a.u)} onChange={()=>tog(a.u)} style={{margin:0}}/> {a.d}</label>)}
@@ -297,6 +305,7 @@ function UpOutForm({user,onClose,state,onSave}){
     </div>
     <div className="fg"><label className="flb">Description</label><textarea className="fi" style={{height:65,resize:'vertical'}} value={f.desc} onChange={e=>set('desc',e.target.value)}/></div>
     <div className="fg"><label className="flb">Attach File</label><input type="file" onChange={hf} accept="image/*,.pdf,.doc,.docx" style={{marginTop:4}}/>{fl&&<div style={{fontSize:12,color:'#27ae60',marginTop:4}}>✅ {fl.name}</div>}</div>
+    {fl&&<FView fd={fl.data} fn={fl.name} ft={fl.type}/>}
     <div className="fr" style={{justifyContent:'flex-end'}}>
       <button className="btn bs" onClick={onClose}>Cancel</button>
       <button className="btn bp" onClick={sub}>Upload Out Letter</button>
@@ -582,6 +591,7 @@ function App(){
   const [state,setState]=useState(EMPTY_STATE);
   const [loading,setLoading]=useState(true);
   const [err,setErr]=useState('');
+  const [toast,setToast]=useState('');
   const [fs,setFS]=useState(undefined);
   useEffect(()=>{
     let alive=true;
@@ -591,25 +601,26 @@ function App(){
       .finally(()=>{if(alive)setLoading(false);});
     return()=>{alive=false;};
   },[]);
-  const sv=async n=>{
+  const sv=async(n,message='Saved successfully.')=>{
     setState(n);
-    try{const saved=await svS(n);setState(saved);setErr('');}
+    try{const saved=await svS(n);setState(saved);setErr('');setToast(message);}
     catch{setErr('Could not save to Google Sheets/Drive. Check the Apps Script deployment.');}
   };
-  const addIn=l=>sv({...state,inL:[...state.inL,l],inC:state.inC+1});
-  const updIn=(id,p)=>sv({...state,inL:state.inL.map(l=>l.id===id?{...l,...p}:l)});
-  const addOut=l=>sv({...state,outL:[...state.outL,l],outC:state.outC+1});
+  const addIn=l=>sv({...state,inL:[...state.inL,l],inC:state.inC+1},'Incoming letter uploaded successfully.');
+  const updIn=(id,p)=>sv({...state,inL:state.inL.map(l=>l.id===id?{...l,...p}:l)},'Letter updated successfully.');
+  const addOut=l=>sv({...state,outL:[...state.outL,l],outC:state.outC+1},'Outgoing letter uploaded successfully.');
   const myNotifications=(state.notifications||[]).filter(n=>user&&n.username===user.u);
   const markMyNotifications=async()=>{
     if(!user)return;
-    try{const saved=await markNotificationsRead(user.u);setState({...EMPTY_STATE,...saved});setErr('');}
+    try{const saved=await markNotificationsRead(user.u);setState({...EMPTY_STATE,...saved});setErr('');setToast('Notifications marked as read.');}
     catch{setErr('Could not update notifications. Check the Apps Script deployment.');}
   };
-  const login=u=>{setUser(u);svSess(u);setPage('dash');};
+  const login=u=>{setUser(u);svSess(u);setPage('dash');setToast('Signed in successfully.');};
   const logout=()=>{setUser(null);svSess(null);setPage('dash');};
   if(!user)return <LoginPage onLogin={login}/>;
   if(loading)return <div style={{minHeight:'100vh',display:'flex',alignItems:'center',justifyContent:'center',background:'#f0f2f7',color:'#003580',fontWeight:800}}>Loading shared data...</div>;
   return <div style={{minHeight:'100vh',background:'#f0f2f7'}}>
+    <Toast message={toast} onClose={()=>setToast('')}/>
     <TopNav user={user} page={page} setPage={p=>{setPage(p);setFS(undefined);}} onLogout={logout} notifications={myNotifications} onMarkNotificationsRead={markMyNotifications}/>
     <div style={{maxWidth:1280,margin:'0 auto',padding:'18px 14px'}}>
       {err&&<div className="ab ae">{err}</div>}
