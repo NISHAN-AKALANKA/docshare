@@ -48,6 +48,8 @@ https://NISHAN-AKALANKA.github.io/docshare/pr-preview/pr-<PR_NUMBER>/
 
 The preview is updated on every PR push and removed when the PR is closed.
 
+If the root URL shows a GitHub Pages 404, run or merge the main Pages deployment first. The preview URL itself must include `/pr-preview/pr-<PR_NUMBER>/`.
+
 ## Run With Docker
 
 ```bash

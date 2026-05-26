@@ -29,3 +29,6 @@ jobs:
           source-dir: ./apps/frontend
           preview-branch: gh-pages
           umbrella-dir: pr-preview
+          pages-base-url: https://NISHAN-AKALANKA.github.io/docshare/
+          wait-for-pages-deployment: true
+          qr-code: false
