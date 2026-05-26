@@ -14,6 +14,33 @@ const SHEETS = {
   notifications: ['id', 'username', 'title', 'message', 'letterId', 'ref', 'type', 'read', 'createdAt'],
 };
 
+const SHEET_ALIASES = {
+  incoming: {
+    subj: ['subject', 'Subject'],
+    desc: ['description', 'Description'],
+    dr: ['dateReceived', 'Date Received'],
+    du: ['dateUploaded', 'Date Uploaded'],
+  },
+  outgoing: {
+    subj: ['subject', 'Subject'],
+    desc: ['description', 'Description'],
+    ds: ['dateSent', 'Date Sent'],
+    du: ['dateUploaded', 'Date Uploaded'],
+  },
+  users: {
+    username: ['user', 'userName', 'Username'],
+    displayName: ['name', 'fullName', 'Display Name'],
+  },
+  assignments: {
+    letterId: ['incomingId', 'documentId'],
+    username: ['user', 'userName', 'Username'],
+  },
+  notifications: {
+    username: ['user', 'userName', 'Username'],
+    createdAt: ['created', 'dateCreated'],
+  },
+};
+
 const DEFAULT_USERS = [
   ['DE', 'de537', 'Divisional Engineer', 'DE', 'TRUE'],
   ['CC', 'cc568', 'Chief Clerk', 'CC', 'TRUE'],
@@ -343,7 +370,7 @@ function ensureFile_(letter, type) {
     fileId: file.getId(),
     fileName: file.getName(),
     fileType: letter.ft || file.getMimeType(),
-    fileUrl: file.getUrl(),
+    fileUrl: driveFileUrl_(file.getId()),
   };
 }
 
@@ -360,12 +387,76 @@ function getSpreadsheet_() {
 
 function ensureSheet_(ss, name, headers) {
   let sheet = ss.getSheetByName(name);
-  if (!sheet) sheet = ss.insertSheet(name);
-  const current = sheet.getRange(1, 1, 1, headers.length).getValues()[0];
-  const mismatch = headers.some((header, index) => current[index] !== header);
-  if (mismatch) sheet.getRange(1, 1, 1, headers.length).setValues([headers]);
+  if (!sheet) {
+    sheet = ss.insertSheet(name);
+    resizeSheetColumns_(sheet, headers.length);
+    sheet.getRange(1, 1, 1, headers.length).setValues([headers]);
+    sheet.setFrozenRows(1);
+    return sheet;
+  }
+
+  const lastColumn = Math.max(sheet.getLastColumn(), headers.length);
+  const currentHeaders = sheet.getRange(1, 1, 1, lastColumn).getValues()[0].map(value => String(value || '').trim());
+  const hasData = sheet.getLastRow() > 1;
+  const orderedHeadersMatch = headers.every((header, index) => currentHeaders[index] === header);
+  const hasExtraColumns = currentHeaders.slice(headers.length).some(Boolean);
+
+  if (!orderedHeadersMatch || hasExtraColumns) {
+    const rows = hasData
+      ? sheet.getRange(2, 1, sheet.getLastRow() - 1, lastColumn).getValues()
+      : [];
+
+    if (hasData || hasExtraColumns) backupSheet_(ss, sheet, name);
+
+    const index = currentHeaders.reduce((map, header, idx) => {
+      if (header) map[header] = idx;
+      return map;
+    }, {});
+    const aliases = SHEET_ALIASES[name] || {};
+    const migratedRows = rows
+      .filter(row => row.some(value => value !== ''))
+      .map(row => headers.map(header => {
+        const candidates = [header, ...(aliases[header] || [])];
+        const found = candidates.find(candidate => index[candidate] !== undefined);
+        return found ? row[index[found]] : '';
+      }));
+
+    sheet.clearContents();
+    resizeSheetColumns_(sheet, headers.length);
+    sheet.getRange(1, 1, 1, headers.length).setValues([headers]);
+    if (migratedRows.length) sheet.getRange(2, 1, migratedRows.length, headers.length).setValues(migratedRows);
+  }
+
   sheet.setFrozenRows(1);
   return sheet;
+}
+
+function resizeSheetColumns_(sheet, desiredColumns) {
+  const currentColumns = sheet.getMaxColumns();
+  if (currentColumns < desiredColumns) {
+    sheet.insertColumnsAfter(currentColumns, desiredColumns - currentColumns);
+  } else if (currentColumns > desiredColumns) {
+    sheet.deleteColumns(desiredColumns + 1, currentColumns - desiredColumns);
+  }
+}
+
+function backupSheet_(ss, sheet, name) {
+  const stamp = Utilities.formatDate(new Date(), Session.getScriptTimeZone(), 'yyyyMMdd_HHmmss');
+  const backupName = uniqueSheetName_(ss, `${name}_backup_${stamp}`);
+  const backup = sheet.copyTo(ss);
+  backup.setName(backupName);
+  ss.setActiveSheet(sheet);
+}
+
+function uniqueSheetName_(ss, desiredName) {
+  let name = desiredName.slice(0, 99);
+  let counter = 1;
+  while (ss.getSheetByName(name)) {
+    const suffix = `_${counter}`;
+    name = `${desiredName.slice(0, 99 - suffix.length)}${suffix}`;
+    counter += 1;
+  }
+  return name;
 }
 
 function ensureDefaultUsers_(ss) {
@@ -468,7 +559,7 @@ function nextCounter_(letters, type) {
 }
 
 function driveFileUrl_(fileId) {
-  return fileId ? `https://drive.google.com/file/d/${fileId}/view` : '';
+  return fileId ? `https://drive.google.com/file/d/${fileId}/preview` : '';
 }
 
 function parsePayload_(e) {

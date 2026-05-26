@@ -30,6 +30,24 @@ ERD:
 docs/erd.md
 ```
 
+## GitHub Pages And PR Previews
+
+This repo deploys the frontend from `apps/frontend` to a `gh-pages` branch.
+
+In GitHub, configure:
+
+```text
+Settings > Pages > Deploy from a branch > gh-pages > / (root)
+```
+
+Pull requests get preview URLs under:
+
+```text
+https://NISHAN-AKALANKA.github.io/docshare/pr-preview/pr-<PR_NUMBER>/
+```
+
+The preview is updated on every PR push and removed when the PR is closed.
+
 ## Run With Docker
 
 ```bash
