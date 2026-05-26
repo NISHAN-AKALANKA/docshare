@@ -124,6 +124,37 @@ function FView({fd:fdata,fn,ft}){
     </div>
   </div>;
 }
+function driveFileId(fileId,fileUrl){
+  if(fileId)return fileId;
+  const m=String(fileUrl||'').match(/\/d\/([^/]+)/);
+  return m?m[1]:'';
+}
+function docPrintSrc(letter){
+  if(!letter)return '';
+  const id=driveFileId(letter.fileId,letter.fileUrl);
+  if(id)return `https://drive.google.com/uc?export=view&id=${id}`;
+  if(letter.fileUrl)return letter.fileUrl;
+  if(letter.fd)return `data:${letter.ft||'application/octet-stream'};base64,${letter.fd}`;
+  return '';
+}
+function escHtml(v){
+  return String(v||'').replace(/[&<>"']/g,ch=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[ch]));
+}
+function printDocument(letter){
+  const src=docPrintSrc(letter);
+  if(!src){alert('No attached document is available for this report item.');return;}
+  const win=window.open('', '_blank');
+  if(!win){alert('Allow pop-ups to print the attached document.');return;}
+  const title=escHtml(letter.fn||letter.ref||'Document');
+  const safeSrc=escHtml(src);
+  if((letter.ft||'').startsWith('image/')){
+    win.document.write(`<!doctype html><html><head><title>${title}</title><style>@page{margin:12mm}body{margin:0;text-align:center}img{max-width:100%;height:auto}</style></head><body><img src="${safeSrc}" onload="setTimeout(()=>window.print(),250)" alt="${title}"></body></html>`);
+    win.document.close();
+    return;
+  }
+  win.location.href=src;
+  setTimeout(()=>{try{win.focus();win.print();}catch{}},1200);
+}
 function useFile(){
   const [f,sf]=useState(null);
   const h=e=>{const fl=e.target.files?.[0];if(!fl)return;const r=new FileReader();r.onload=ev=>sf({data:ev.target.result.split(',')[1],name:fl.name,type:fl.type});r.readAsDataURL(fl);};
@@ -364,6 +395,35 @@ function OutModal({letter,onClose}){
   </Mod>;
 }
 
+function ReportModal({letter,onClose}){
+  const hasDoc=!!docPrintSrc(letter);
+  return <Mod title={`📊 ${letter.ref}`} onClose={onClose}>
+    <div className="g2">
+      <Fld l="Reference No" v={letter.ref}/><Fld l="Date Received" v={fd(letter.dr)}/>
+      <Fld l="From" v={letter.from}/><Fld l="To" v={letter.to}/>
+      <Fld l="Uploaded By" v={letter.by}/><Fld l="Date Uploaded" v={fdt(letter.du)}/>
+      <Fld l="Status" v={<Bdg s={letter.status}/>}/>{letter.deAt&&<Fld l="DE Reviewed" v={fdt(letter.deAt)}/>}
+    </div>
+    <Fld l="Subject" v={letter.subj}/>
+    {letter.desc&&<Fld l="Description" v={letter.desc}/>}
+    {letter.note&&<div className="na">
+      <div style={{fontWeight:700,color:'#003580',marginBottom:7,fontSize:13}}>📝 DE Note / Instructions</div>
+      <div style={{fontSize:13,color:'#333',whiteSpace:'pre-wrap'}}>{letter.note}</div>
+    </div>}
+    {letter.asgn.length>0&&<div style={{marginTop:14}}>
+      <div style={{fontWeight:700,color:'#003580',marginBottom:7,fontSize:13}}>👥 Assigned Members</div>
+      {letter.asgn.map(a=><div key={a.u} style={{display:'flex',justifyContent:'space-between',alignItems:'center',padding:'7px 11px',background:'#f9f9f9',border:'1px solid #eee',borderRadius:6,marginBottom:5}}>
+        <span style={{fontSize:13,fontWeight:600}}>{a.d}</span>
+        <div className="fr"><Bdg s={a.s}/><span style={{color:a.seen?'#27ae60':'#e74c3c',fontWeight:600,fontSize:11}}>{a.seen?`👁 Seen ${fdt(a.seen)}`:'👁 Unseen'}</span></div>
+      </div>)}
+    </div>}
+    <div className="fr" style={{justifyContent:'flex-end',marginTop:14}}>
+      <button className="btn bp" onClick={()=>printDocument(letter)} disabled={!hasDoc} style={!hasDoc?{opacity:.45,cursor:'not-allowed'}:null}>🖨 Print Document</button>
+    </div>
+    {hasDoc?<FView fd={letter.fd} fn={letter.fn} ft={letter.ft}/>:<div className="ab aw" style={{marginTop:12}}>No attached document is available for this report item.</div>}
+  </Mod>;
+}
+
 function Dashboard({user,state,setPage,setFS}){
   const {inL}=state;
   const isDE=user.r==='DE',isCC=user.r==='CC',isAdmin=isDE||isCC;
@@ -492,6 +552,7 @@ function OutPage({user,state,onAdd}){
 
 function RepPage({state}){
   const [pf,setPf]=useState('');const [sf,setSf]=useState('');const [df,setDf]=useState('');const [dt,setDt]=useState('');
+  const [sel,setSel]=useState(null);
   const {inL,outL}=state;
   let ls=inL;
   if(pf) ls=ls.filter(l=>l.asgn.some(a=>a.u===pf));
@@ -510,19 +571,21 @@ function RepPage({state}){
       <select className="fi" style={{width:155}} value={sf} onChange={e=>setSf(e.target.value)}><option value="">All Status</option><option value="pending_de">Pending DE</option><option value="de_reviewed">DE Reviewed</option><option value="ongoing">Ongoing</option><option value="done">Done</option></select>
       <input type="date" className="fi" style={{width:132}} value={df} onChange={e=>setDf(e.target.value)}/>
       <input type="date" className="fi" style={{width:132}} value={dt} onChange={e=>setDt(e.target.value)}/>
-      <button className="btn bp bsm" onClick={()=>window.print()}>🖨 Print</button>
+      <button className="btn bp bsm" onClick={()=>sel?printDocument(sel):alert('Click a report item first.')}>🖨 Print Selected</button>
       <a href={DRIVE} target="_blank" rel="noopener noreferrer" style={{padding:'5px 13px',background:'#34a853',color:'#fff',borderRadius:6,fontSize:12,fontWeight:600,textDecoration:'none'}}>📁 Drive</a>
     </div>
     <div style={{fontSize:13,fontWeight:700,color:'#003580',marginBottom:7}}>{ls.length} letter{ls.length!==1?'s':''}</div>
     <div className="tw"><table>
-      <thead><tr><th>Ref No</th><th>Date</th><th>From</th><th>Subject</th><th>Assignees & Seen</th><th>Status</th><th>DE Note</th></tr></thead>
-      <tbody>{ls.map(l=><tr key={l.id}>
+      <thead><tr><th>Ref No</th><th>Date</th><th>From</th><th>Subject</th><th>Assignees & Seen</th><th>Status</th><th>DE Note</th><th></th></tr></thead>
+      <tbody>{ls.map(l=><tr key={l.id} onClick={()=>setSel(l)} style={{cursor:'pointer'}}>
         <td><strong>{l.ref}</strong></td><td>{fd(l.dr)}</td><td>{l.from}</td><td>{l.subj}</td>
         <td style={{fontSize:11}}>{l.asgn.map(a=><div key={a.u} style={{marginBottom:2}}>{a.d}: <Bdg s={a.s}/> <span style={{color:a.seen?'#27ae60':'#e74c3c',fontWeight:600,fontSize:11}}>{a.seen?'👁 Seen':'👁 Unseen'}</span></div>)}</td>
         <td><Bdg s={l.status}/></td>
         <td style={{fontSize:12,color:'#555'}}>{l.note||'-'}</td>
+        <td><button className="btn bp bsm" onClick={e=>{e.stopPropagation();setSel(l);}}>View</button></td>
       </tr>)}</tbody>
     </table></div>
+    {sel&&<ReportModal letter={sel} onClose={()=>setSel(null)}/>}
   </div>;
 }
 
