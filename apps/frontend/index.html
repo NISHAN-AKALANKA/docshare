@@ -145,7 +145,7 @@ function attachmentsOf(letter){
   return (letter.fileId||letter.fileUrl||letter.fd||letter.fn)?[{fileId:letter.fileId,fn:letter.fn,ft:letter.ft,fileUrl:letter.fileUrl,fd:letter.fd}]:[];
 }
 function firstAttachment(letter){return attachmentsOf(letter)[0]||null;}
-function attachmentDoc(letter,attachment){return {...(letter||{}),...(attachment||{})};}
+function attachmentDoc(letter,attachment){const doc={...(letter||{}),...(attachment||{})};delete doc.attachments;return doc;}
 function docPrintSrc(item){
   if(!item)return '';
   const id=driveFileId(item.fileId,item.fileUrl);
@@ -161,6 +161,9 @@ function imagePrintSrc(item){
   if(id)return `https://drive.google.com/uc?export=view&id=${id}`;
   return item.fileUrl||'';
 }
+function isImageAttachment(item){
+  return (item?.ft||'').startsWith('image/')||/\.(png|jpe?g|gif|webp|bmp|tiff?)$/i.test(item?.fn||item?.fileUrl||'');
+}
 function escHtml(v){
   return String(v||'').replace(/[&<>"']/g,ch=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[ch]));
 }
@@ -175,7 +178,36 @@ function b64BlobUrl(data,type){
   }
   return URL.createObjectURL(new Blob(chunks,{type:type||'application/octet-stream'}));
 }
+async function loadImagePrintSrc(item){
+  if(item.fd)return imagePrintSrc(item);
+  if(item.fileId){
+    const data=await api('getFileData',{fileId:item.fileId});
+    if(data.ok===false)throw new Error(data.error||'Could not load image.');
+    return `data:${data.fileType||item.ft||'image/jpeg'};base64,${data.data}`;
+  }
+  return imagePrintSrc(item);
+}
+async function printImageAttachments(letter,files){
+  const win=window.open('', '_blank', 'width=980,height=720');
+  if(!win){alert('Allow pop-ups to print the attached documents.');return;}
+  const title=escHtml(letter.ref||'Documents');
+  win.document.write(`<!doctype html><html><head><title>${title}</title></head><body style="font-family:Arial,sans-serif;padding:18px">Loading ${files.length} images...</body></html>`);
+  win.document.close();
+  try{
+    const images=await Promise.all(files.map((file,index)=>loadImagePrintSrc(attachmentDoc(letter,file)).then(src=>({src,title:file.fn||`Image ${index+1}`}))));
+    const pages=images.map(image=>`<section class="page"><img src="${escHtml(image.src)}" alt="${escHtml(image.title)}" onload="done()" onerror="this.parentNode.textContent='Could not load image.';done()"></section>`).join('');
+    win.document.open();
+    win.document.write(`<!doctype html><html><head><title>${title}</title><style>@page{margin:0}html,body{margin:0;width:100%;background:#fff}.page{min-height:100vh;display:flex;align-items:center;justify-content:center;break-after:page;page-break-after:always}.page:last-child{break-after:auto;page-break-after:auto}img{display:block;max-width:100%;max-height:100vh;width:auto;height:auto}</style><script>var total=${images.length},loaded=0;function done(){loaded+=1;if(loaded>=total)setTimeout(function(){window.focus();window.print();},350)}window.onafterprint=function(){setTimeout(function(){window.close()},250)}<\/script></head><body>${pages}</body></html>`);
+    win.document.close();
+  }catch(error){
+    win.document.open();
+    win.document.write(`<!doctype html><html><body style="font-family:Arial,sans-serif;padding:18px">Could not load images for printing.<br>${escHtml(error.message||'')}</body></html>`);
+    win.document.close();
+  }
+}
 async function printDocument(letter){
+  const files=attachmentsOf(letter);
+  if(files.length>1&&files.every(isImageAttachment)){await printImageAttachments(letter,files);return;}
   const item=attachmentDoc(letter,firstAttachment(letter)||letter);
   const src=docPrintSrc(item);
   if(!src){alert('No attached document is available for this report item.');return;}
@@ -190,14 +222,11 @@ async function printDocument(letter){
     win.document.write(`<!doctype html><html><head><title>${title}</title><style>@page{margin:0}html,body{margin:0;width:100%;min-height:100%;background:#fff}.sheet{min-height:100vh;display:flex;align-items:center;justify-content:center}img{display:block;max-width:100%;max-height:100vh;width:auto;height:auto}</style>${printScript}</head><body><div class="sheet"><img src="${safeImgSrc}" alt="${title}" onload="p()" onerror="document.body.textContent='Could not load image for printing.'"></div></body></html>`);
     win.document.close();
   };
-  if((item.ft||'').startsWith('image/')){
+  if(isImageAttachment(item)){
     win.document.write(`<!doctype html><html><head><title>${title}</title></head><body style="font-family:Arial,sans-serif;padding:18px">Loading image...</body></html>`);
     win.document.close();
-    if(item.fd){renderImage(imagePrintSrc(item));return;}
     try{
-      const data=await api('getFileData',{fileId:item.fileId});
-      if(data.ok===false)throw new Error(data.error||'Could not load image.');
-      renderImage(`data:${data.fileType||item.ft||'image/jpeg'};base64,${data.data}`);
+      renderImage(await loadImagePrintSrc(item));
     }catch(error){
       win.document.open();
       win.document.write(`<!doctype html><html><body style="font-family:Arial,sans-serif;padding:18px">Could not load image for printing.<br>${escHtml(error.message||'')}</body></html>`);
