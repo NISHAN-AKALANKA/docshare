@@ -85,6 +85,7 @@ function doPost(e) {
     if (action === 'login') return json_(login_(payload.username, payload.password));
     if (action === 'bootstrap') return json_({ users: publicUsers_(), state: readState_() });
     if (action === 'getState') return json_(readState_());
+    if (action === 'getFileData') return json_(getFileData_(payload.fileId));
     if (action === 'saveState') return json_(saveState_(payload.state));
     if (action === 'markNotificationsRead') return json_(markNotificationsRead_(payload.username));
 
@@ -371,6 +372,19 @@ function ensureFile_(letter, type) {
     fileName: file.getName(),
     fileType: letter.ft || file.getMimeType(),
     fileUrl: driveFileUrl_(file.getId()),
+  };
+}
+
+function getFileData_(fileId) {
+  if (!fileId) return { ok: false, error: 'Missing file id.' };
+  const file = DriveApp.getFileById(fileId);
+  const blob = file.getBlob();
+  return {
+    ok: true,
+    fileId,
+    fileName: file.getName(),
+    fileType: blob.getContentType() || file.getMimeType(),
+    data: Utilities.base64Encode(blob.getBytes()),
   };
 }
 

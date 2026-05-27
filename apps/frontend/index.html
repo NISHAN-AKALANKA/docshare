@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8"/>
 <meta name="viewport" content="width=device-width,initial-scale=1.0"/>
-<title>DE Office Battaramulla - Letter Management</title>
+<title>Office - Letter Management</title>
 <script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
 <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
 <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
@@ -20,6 +20,7 @@ th{background:#003580;color:#fff;padding:9px 10px;text-align:left;font-size:12px
 td{padding:7px 10px;border-bottom:1px solid #eee;vertical-align:middle}
 tr:nth-child(even){background:#f9f9fb}
 tr:hover td{background:#e8f0fd}
+.trsel td{background:#dbeafe!important}
 .badge{display:inline-block;padding:2px 9px;border-radius:20px;font-size:11px;font-weight:700;color:#fff;white-space:nowrap}
 .fl{font-size:11px;font-weight:700;color:#888;text-transform:uppercase;letter-spacing:.4px;margin-bottom:3px}
 .fv{font-size:13px;color:#333}
@@ -128,9 +129,101 @@ function Mod({title,onClose,children}){
   </div>;
 }
 function drivePreviewUrl(fileId,fileUrl){
-  if(fileId)return `https://drive.google.com/file/d/${fileId}/preview`;
+  const id=driveFileId(fileId,fileUrl);
+  if(id)return `https://drive.google.com/file/d/${id}/preview`;
+  return fileUrl;
+}
+function driveFileId(fileId,fileUrl){
+  if(fileId)return fileId;
   const m=String(fileUrl||'').match(/\/d\/([^/]+)/);
-  return m?`https://drive.google.com/file/d/${m[1]}/preview`:fileUrl;
+  return m?m[1]:'';
+}
+function docPrintSrc(letter){
+  if(!letter)return '';
+  const id=driveFileId(letter.fileId,letter.fileUrl);
+  if(id)return `https://drive.google.com/file/d/${id}/preview`;
+  if(letter.fileUrl)return letter.fileUrl;
+  if(letter.fd)return `data:${letter.ft||'application/octet-stream'};base64,${letter.fd}`;
+  return '';
+}
+function imagePrintSrc(letter){
+  if(!letter)return '';
+  if(letter.fd)return `data:${letter.ft||'image/*'};base64,${letter.fd}`;
+  const id=driveFileId(letter.fileId,letter.fileUrl);
+  if(id)return `https://drive.google.com/uc?export=view&id=${id}`;
+  return letter.fileUrl||'';
+}
+function escHtml(v){
+  return String(v||'').replace(/[&<>"']/g,ch=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[ch]));
+}
+function b64BlobUrl(data,type){
+  const raw=atob(data);
+  const chunks=[];
+  for(let i=0;i<raw.length;i+=8192){
+    const part=raw.slice(i,i+8192);
+    const bytes=new Uint8Array(part.length);
+    for(let j=0;j<part.length;j++)bytes[j]=part.charCodeAt(j);
+    chunks.push(bytes);
+  }
+  return URL.createObjectURL(new Blob(chunks,{type:type||'application/octet-stream'}));
+}
+async function printDocument(letter){
+  const src=docPrintSrc(letter);
+  if(!src){alert('No attached document is available for this report item.');return;}
+  const win=window.open('', '_blank', 'width=980,height=720');
+  if(!win){alert('Allow pop-ups to print the attached document.');return;}
+  const title=escHtml(letter.fn||letter.ref||'Document');
+  const safeSrc=escHtml(src);
+  const printScript=`<script>function p(){setTimeout(function(){window.focus();window.print();},350)}window.onafterprint=function(){setTimeout(function(){window.close()},250)}<\/script>`;
+  const renderImage=imgSrc=>{
+    const safeImgSrc=escHtml(imgSrc);
+    win.document.open();
+    win.document.write(`<!doctype html><html><head><title>${title}</title><style>@page{margin:0}html,body{margin:0;width:100%;min-height:100%;background:#fff}.sheet{min-height:100vh;display:flex;align-items:center;justify-content:center}img{display:block;max-width:100%;max-height:100vh;width:auto;height:auto}</style>${printScript}</head><body><div class="sheet"><img src="${safeImgSrc}" alt="${title}" onload="p()" onerror="document.body.textContent='Could not load image for printing.'"></div></body></html>`);
+    win.document.close();
+  };
+  if((letter.ft||'').startsWith('image/')){
+    win.document.write(`<!doctype html><html><head><title>${title}</title></head><body style="font-family:Arial,sans-serif;padding:18px">Loading image...</body></html>`);
+    win.document.close();
+    if(letter.fd){renderImage(imagePrintSrc(letter));return;}
+    try{
+      const data=await api('getFileData',{fileId:letter.fileId});
+      if(data.ok===false)throw new Error(data.error||'Could not load image.');
+      renderImage(`data:${data.fileType||letter.ft||'image/jpeg'};base64,${data.data}`);
+    }catch(error){
+      win.document.open();
+      win.document.write(`<!doctype html><html><body style="font-family:Arial,sans-serif;padding:18px">Could not load image for printing.<br>${escHtml(error.message||'')}</body></html>`);
+      win.document.close();
+    }
+    return;
+  }
+  if((letter.ft||'')==='application/pdf'){
+    win.document.write(`<!doctype html><html><head><title>${title}</title></head><body style="font-family:Arial,sans-serif;padding:18px">Loading PDF...</body></html>`);
+    win.document.close();
+    try{
+      const data=letter.fd
+        ?{fileType:letter.ft,data:letter.fd}
+        :await api('getFileData',{fileId:letter.fileId});
+      if(data.ok===false)throw new Error(data.error||'Could not load PDF.');
+      const blobUrl=b64BlobUrl(data.data,data.fileType||letter.ft||'application/pdf');
+      win.location.href=blobUrl;
+      setTimeout(()=>{
+        try{win.focus();win.print();}
+        catch(error){
+          win.document.open();
+          win.document.write(`<!doctype html><html><body style="font-family:Arial,sans-serif;padding:18px">Could not open printer for this PDF. Use the PDF viewer print button.</body></html>`);
+          win.document.close();
+        }
+        setTimeout(()=>URL.revokeObjectURL(blobUrl),60000);
+      },2500);
+    }catch(error){
+      win.document.open();
+      win.document.write(`<!doctype html><html><body style="font-family:Arial,sans-serif;padding:18px">Could not load PDF for printing.<br>${escHtml(error.message||'')}</body></html>`);
+      win.document.close();
+    }
+    return;
+  }
+  win.document.write(`<!doctype html><html><head><title>${title}</title><style>@page{margin:0}html,body{margin:0;width:100%;height:100%;overflow:hidden}iframe{width:100%;height:100%;border:0}</style>${printScript}</head><body><iframe src="${safeSrc}" onload="p()"></iframe></body></html>`);
+  win.document.close();
 }
 function FullDocView({src,fn,onClose}){
   return <div className="mo" onClick={e=>{if(e.target===e.currentTarget)onClose();}}>
@@ -191,10 +284,9 @@ function LoginPage({onLogin}){
   return <div style={{minHeight:'100vh',background:'linear-gradient(135deg,#001f5b,#003580,#005bb5)',display:'flex',flexDirection:'column',alignItems:'center',justifyContent:'center',padding:16}}>
     <div style={{background:'#fff',borderRadius:12,boxShadow:'0 20px 60px rgba(0,0,0,.4)',maxWidth:420,width:'100%',overflow:'hidden'}}>
       <div style={{background:'linear-gradient(135deg,#001f5b,#003580)',padding:'26px 24px 20px',textAlign:'center'}}>
-        <img src={LOGO} alt="WPC Logo" style={{height:72,objectFit:'contain',marginBottom:10,borderRadius:4}}/>
         <div style={{color:'#fff',fontWeight:800,fontSize:16}}>DE Office – Battaramulla</div>
         <div style={{color:'#b3d4ff',fontSize:13,marginTop:3}}>Letter Management System</div>
-        <div style={{color:'rgba(255,255,255,.5)',fontSize:11,marginTop:2}}>Western Provincial Council · Engineering Branch</div>
+        <div style={{color:'rgba(255,255,255,.5)',fontSize:11,marginTop:2}}>Office Branch</div>
       </div>
       <div style={{padding:'24px 28px'}}>
         <div className="fg"><label className="flb">Username</label><input className="fi" value={u} onChange={e=>su(e.target.value)} onKeyDown={e=>e.key==='Enter'&&go()} placeholder="e.g. DE, CC, MO1…"/></div>
@@ -203,7 +295,7 @@ function LoginPage({onLogin}){
         <button className="btn bp" style={{width:'100%',padding:'10px'}} onClick={go} disabled={busy}>{busy?'Signing In...':'Sign In'}</button>
       </div>
     </div>
-    <div style={{color:'rgba(255,255,255,.4)',fontSize:11,marginTop:16}}>© 2026 Divisional Engineer's Office, Battaramulla</div>
+    <div style={{color:'rgba(255,255,255,.4)',fontSize:11,marginTop:16}}>© 2026 Office</div>
   </div>;
 }
 
@@ -214,10 +306,9 @@ function TopNav({user,page,setPage,onLogout,notifications,onMarkNotificationsRea
   const tabs=[{id:'dash',l:'🏠 Dashboard'},{id:'in',l:'📥 In Letters'},...(!['STO','TO'].includes(user.r)?[{id:'out',l:'📤 Out Letters'}]:[]),...(isAdmin?[{id:'rep',l:'📊 Reports'}]:[])];
   return <div style={{background:'linear-gradient(to right,#001f5b,#003580)',boxShadow:'0 2px 10px rgba(0,0,0,.2)',position:'sticky',top:0,zIndex:100}}>
     <div style={{display:'flex',alignItems:'center',padding:'8px 18px',gap:10,borderBottom:'1px solid rgba(255,255,255,.1)'}}>
-      <img src={LOGO} alt="WPC" style={{height:42,objectFit:'contain',flexShrink:0}}/>
       <div style={{flex:1}}>
         <div style={{color:'#fff',fontWeight:800,fontSize:14}}>DE Office – Battaramulla &nbsp;|&nbsp; Letter Management System</div>
-        <div style={{color:'rgba(255,255,255,.5)',fontSize:11}}>Western Provincial Council · Engineering Branch</div>
+
       </div>
       <div style={{textAlign:'right',marginRight:6}}>
         <div style={{color:'#fff',fontSize:12,fontWeight:600}}>{user.d}</div>
@@ -444,6 +535,35 @@ function OutModal({letter,onClose}){
   </Mod>;
 }
 
+function ReportModal({letter,onClose}){
+  const hasDoc=!!docPrintSrc(letter);
+  return <Mod title={`📊 ${letter.ref}`} onClose={onClose}>
+    <div className="g2">
+      <Fld l="Reference No" v={letter.ref}/><Fld l="Date Received" v={fd(letter.dr)}/>
+      <Fld l="From" v={letter.from}/><Fld l="To" v={letter.to}/>
+      <Fld l="Uploaded By" v={letter.by}/><Fld l="Date Uploaded" v={fdt(letter.du)}/>
+      <Fld l="Status" v={<Bdg s={letter.status}/>}/>{letter.deAt&&<Fld l="DE Reviewed" v={fdt(letter.deAt)}/>}
+    </div>
+    <Fld l="Subject" v={letter.subj}/>
+    {letter.desc&&<Fld l="Description" v={letter.desc}/>}
+    {letter.note&&<div className="na">
+      <div style={{fontWeight:700,color:'#003580',marginBottom:7,fontSize:13}}>📝 DE Note / Instructions</div>
+      <div style={{fontSize:13,color:'#333',whiteSpace:'pre-wrap'}}>{letter.note}</div>
+    </div>}
+    {letter.asgn.length>0&&<div style={{marginTop:14}}>
+      <div style={{fontWeight:700,color:'#003580',marginBottom:7,fontSize:13}}>👥 Assigned Members</div>
+      {letter.asgn.map(a=><div key={a.u} style={{display:'flex',justifyContent:'space-between',alignItems:'center',padding:'7px 11px',background:'#f9f9f9',border:'1px solid #eee',borderRadius:6,marginBottom:5}}>
+        <span style={{fontSize:13,fontWeight:600}}>{a.d}</span>
+        <div className="fr"><Bdg s={a.s}/><span style={{color:a.seen?'#27ae60':'#e74c3c',fontWeight:600,fontSize:11}}>{a.seen?`👁 Seen ${fdt(a.seen)}`:'👁 Unseen'}</span></div>
+      </div>)}
+    </div>}
+    <div className="fr" style={{justifyContent:'flex-end',marginTop:14}}>
+      <button className="btn bp" onClick={()=>printDocument(letter)} disabled={!hasDoc} style={!hasDoc?{opacity:.45,cursor:'not-allowed'}:null}>🖨 Print Document</button>
+    </div>
+    {hasDoc?<FView fd={letter.fd} fn={letter.fn} ft={letter.ft} fileUrl={letter.fileUrl} fileId={letter.fileId}/>:<div className="ab aw" style={{marginTop:12}}>No attached document is available for this report item.</div>}
+  </Mod>;
+}
+
 function Dashboard({user,state,setPage,setFS}){
   const {inL}=state;
   const isDE=user.r==='DE',isCC=user.r==='CC',isAdmin=isDE||isCC;
@@ -572,6 +692,8 @@ function OutPage({user,state,onAdd}){
 
 function RepPage({state}){
   const [pf,setPf]=useState('');const [sf,setSf]=useState('');const [df,setDf]=useState('');const [dt,setDt]=useState('');
+  const [sel,setSel]=useState(null);
+  const [viewing,setViewing]=useState(null);
   const {inL,outL}=state;
   let ls=inL;
   if(pf) ls=ls.filter(l=>l.asgn.some(a=>a.u===pf));
@@ -590,19 +712,21 @@ function RepPage({state}){
       <select className="fi" style={{width:155}} value={sf} onChange={e=>setSf(e.target.value)}><option value="">All Status</option><option value="pending_de">Pending DE</option><option value="de_reviewed">DE Reviewed</option><option value="ongoing">Ongoing</option><option value="done">Done</option></select>
       <input type="date" className="fi" style={{width:132}} value={df} onChange={e=>setDf(e.target.value)}/>
       <input type="date" className="fi" style={{width:132}} value={dt} onChange={e=>setDt(e.target.value)}/>
-      <button className="btn bp bsm" onClick={()=>window.print()}>🖨 Print</button>
+      <button className="btn bp bsm" onClick={()=>sel?printDocument(sel):alert('Click a report item first.')}>🖨 Print Selected</button>
       <a href={DRIVE} target="_blank" rel="noopener noreferrer" style={{padding:'5px 13px',background:'#34a853',color:'#fff',borderRadius:6,fontSize:12,fontWeight:600,textDecoration:'none'}}>📁 Drive</a>
     </div>
     <div style={{fontSize:13,fontWeight:700,color:'#003580',marginBottom:7}}>{ls.length} letter{ls.length!==1?'s':''}</div>
     <div className="tw"><table>
-      <thead><tr><th>Ref No</th><th>Date</th><th>From</th><th>Subject</th><th>Assignees & Seen</th><th>Status</th><th>DE Note</th></tr></thead>
-      <tbody>{ls.map(l=><tr key={l.id}>
+      <thead><tr><th>Ref No</th><th>Date</th><th>From</th><th>Subject</th><th>Assignees & Seen</th><th>Status</th><th>DE Note</th><th></th></tr></thead>
+      <tbody>{ls.map(l=><tr key={l.id} className={sel?.id===l.id?'trsel':''} onClick={()=>setSel(l)} style={{cursor:'pointer'}}>
         <td><strong>{l.ref}</strong></td><td>{fd(l.dr)}</td><td>{l.from}</td><td>{l.subj}</td>
         <td style={{fontSize:11}}>{l.asgn.map(a=><div key={a.u} style={{marginBottom:2}}>{a.d}: <Bdg s={a.s}/> <span style={{color:a.seen?'#27ae60':'#e74c3c',fontWeight:600,fontSize:11}}>{a.seen?'👁 Seen':'👁 Unseen'}</span></div>)}</td>
         <td><Bdg s={l.status}/></td>
         <td style={{fontSize:12,color:'#555'}}>{l.note||'-'}</td>
+        <td><button className="btn bp bsm" onClick={e=>{e.stopPropagation();setSel(l);setViewing(l);}}>View</button></td>
       </tr>)}</tbody>
     </table></div>
+    {viewing&&<ReportModal letter={viewing} onClose={()=>setViewing(null)}/>}
   </div>;
 }
 
