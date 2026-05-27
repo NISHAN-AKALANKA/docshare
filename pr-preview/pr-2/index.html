@@ -141,7 +141,7 @@ function driveFileId(fileId,fileUrl){
 function docPrintSrc(letter){
   if(!letter)return '';
   const id=driveFileId(letter.fileId,letter.fileUrl);
-  if(id)return `https://drive.google.com/uc?export=view&id=${id}`;
+  if(id)return `https://drive.google.com/file/d/${id}/preview`;
   if(letter.fileUrl)return letter.fileUrl;
   if(letter.fd)return `data:${letter.ft||'application/octet-stream'};base64,${letter.fd}`;
   return '';
@@ -152,17 +152,36 @@ function escHtml(v){
 function printDocument(letter){
   const src=docPrintSrc(letter);
   if(!src){alert('No attached document is available for this report item.');return;}
-  const win=window.open('', '_blank');
-  if(!win){alert('Allow pop-ups to print the attached document.');return;}
+  const frame=document.createElement('iframe');
   const title=escHtml(letter.fn||letter.ref||'Document');
   const safeSrc=escHtml(src);
+  frame.style.position='fixed';
+  frame.style.right='0';
+  frame.style.bottom='0';
+  frame.style.width='1px';
+  frame.style.height='1px';
+  frame.style.border='0';
+  frame.style.opacity='0';
+  frame.style.pointerEvents='none';
+  document.body.appendChild(frame);
+  const finish=()=>setTimeout(()=>frame.remove(),12000);
+  const doPrint=()=>{
+    try{
+      frame.contentWindow.focus();
+      frame.contentWindow.print();
+      finish();
+    }catch(err){
+      frame.remove();
+      alert('The browser blocked direct printing for this document. Open it in Full View and use the document print control.');
+    }
+  };
   if((letter.ft||'').startsWith('image/')){
-    win.document.write(`<!doctype html><html><head><title>${title}</title><style>@page{margin:12mm}body{margin:0;text-align:center}img{max-width:100%;height:auto}</style></head><body><img src="${safeSrc}" onload="setTimeout(()=>window.print(),250)" alt="${title}"></body></html>`);
-    win.document.close();
+    frame.onload=()=>setTimeout(doPrint,250);
+    frame.srcdoc=`<!doctype html><html><head><title>${title}</title><style>@page{margin:12mm}body{margin:0;text-align:center}img{max-width:100%;height:auto}</style></head><body><img src="${safeSrc}" alt="${title}"></body></html>`;
     return;
   }
-  win.location.href=src;
-  setTimeout(()=>{try{win.focus();win.print();}catch{}},1200);
+  frame.onload=()=>setTimeout(doPrint,700);
+  frame.src=src;
 }
 function FullDocView({src,fn,onClose}){
   return <div className="mo" onClick={e=>{if(e.target===e.currentTarget)onClose();}}>
@@ -247,7 +266,7 @@ function TopNav({user,page,setPage,onLogout,notifications,onMarkNotificationsRea
     <div style={{display:'flex',alignItems:'center',padding:'8px 18px',gap:10,borderBottom:'1px solid rgba(255,255,255,.1)'}}>
       <div style={{flex:1}}>
         <div style={{color:'#fff',fontWeight:800,fontSize:14}}>DE Office – Battaramulla &nbsp;|&nbsp; Letter Management System</div>
-        <div style={{color:'rgba(255,255,255,.5)',fontSize:11}}>Western Provincial Council · Engineering Branch</div>
+
       </div>
       <div style={{textAlign:'right',marginRight:6}}>
         <div style={{color:'#fff',fontSize:12,fontWeight:600}}>{user.d}</div>
