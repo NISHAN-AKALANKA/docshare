@@ -16,9 +16,16 @@ concurrency:
 jobs:
   deploy:
     runs-on: ubuntu-latest
+    environment: github-pages
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+
+      - name: Check required config
+        if: ${{ vars.DOCSHARE_GAS_WEB_APP_URL == '' }}
+        run: |
+          echo "DOCSHARE_GAS_WEB_APP_URL is required in repository variables or the github-pages environment."
+          exit 1
 
       - name: Generate frontend config
         if: ${{ vars.DOCSHARE_GAS_WEB_APP_URL != '' }}
