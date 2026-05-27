@@ -1,17 +1,14 @@
 # Docshare
 
-Simple monorepo for the letter management app.
-
 ## Structure
 
-- `apps/frontend`: static React HTML app served by nginx
-- `apps/backend`: Node.js API that saves shared app data to `data/data.json`
-- `apps/apps-script`: Google Apps Script API for Google Sheets and Drive hosting
-- `data`: local persistent data folder mounted into Docker
+- `apps/frontend`: static HTML/React frontend deployed to GitHub Pages
+- `apps/apps-script`: Google Apps Script API for Google Sheets and Drive
+- `docs`: setup notes and ERD
 
-## Recommended Public Hosting
+## Hosting
 
-The recommended free public setup is:
+This project uses:
 
 - GitHub Pages for the frontend
 - Google Apps Script Web App for the API
@@ -21,7 +18,7 @@ The recommended free public setup is:
 Setup guide:
 
 ```text
-docs/google-apps-script-setup.md
+docs/google-apps-script-setup-guide.md
 ```
 
 ERD:
@@ -52,32 +49,30 @@ If the root URL shows a GitHub Pages 404, run or merge the main Pages deployment
 
 If the PR preview workflow logs `Timed out waiting for build to start`, the preview files were still pushed to `gh-pages`; GitHub Pages just did not report a matching deployment in time. Wait a minute and open the preview URL directly.
 
-## Run With Docker
+## Runtime Configuration
 
-```bash
-docker compose up --build
-```
-
-Open:
+Frontend runtime values live in:
 
 ```text
-http://localhost:3005
+apps/frontend/config.js
 ```
 
-The backend saves shared data on your local machine at:
+Use `apps/frontend/config.example.js` as the template when copying this app to another repository, Apps Script project, Sheet, or Drive folder.
+
+`driveUrl` may be left blank. The frontend will use the workspace folder returned by Apps Script after the API initializes.
+
+For GitHub Actions deployments, set repository variables and the workflows will generate `config.js` during deployment:
 
 ```text
-./data/data.json
+DOCSHARE_APP_TITLE
+DOCSHARE_APP_SUBTITLE
+DOCSHARE_APP_BRANCH
+DOCSHARE_COPYRIGHT_TEXT
+DOCSHARE_DRIVE_URL
+DOCSHARE_GAS_WEB_APP_URL
+DOCSHARE_LOCAL_STORAGE_KEY
+DOCSHARE_SESSION_STORAGE_KEY
+DOCSHARE_OUTGOING_FROM
+DOCSHARE_REF_PREFIX
+PAGES_BASE_URL
 ```
-
-## Public Access
-
-Expose `http://localhost:3005` with a tunnel such as Cloudflare Tunnel or ngrok.
-
-Example:
-
-```bash
-cloudflared tunnel --url http://localhost:3005
-```
-
-Keep the computer on while people use the app.
