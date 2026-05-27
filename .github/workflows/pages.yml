@@ -20,6 +20,37 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
+      - name: Generate frontend config
+        if: ${{ vars.DOCSHARE_GAS_WEB_APP_URL != '' }}
+        env:
+          DOCSHARE_APP_TITLE: ${{ vars.DOCSHARE_APP_TITLE }}
+          DOCSHARE_APP_SUBTITLE: ${{ vars.DOCSHARE_APP_SUBTITLE }}
+          DOCSHARE_APP_BRANCH: ${{ vars.DOCSHARE_APP_BRANCH }}
+          DOCSHARE_COPYRIGHT_TEXT: ${{ vars.DOCSHARE_COPYRIGHT_TEXT }}
+          DOCSHARE_DRIVE_URL: ${{ vars.DOCSHARE_DRIVE_URL }}
+          DOCSHARE_GAS_WEB_APP_URL: ${{ vars.DOCSHARE_GAS_WEB_APP_URL }}
+          DOCSHARE_LOCAL_STORAGE_KEY: ${{ vars.DOCSHARE_LOCAL_STORAGE_KEY }}
+          DOCSHARE_SESSION_STORAGE_KEY: ${{ vars.DOCSHARE_SESSION_STORAGE_KEY }}
+          DOCSHARE_OUTGOING_FROM: ${{ vars.DOCSHARE_OUTGOING_FROM }}
+          DOCSHARE_REF_PREFIX: ${{ vars.DOCSHARE_REF_PREFIX }}
+        run: |
+          node - <<'NODE'
+          const fs = require('fs');
+          const config = {
+            appTitle: process.env.DOCSHARE_APP_TITLE || 'Docshare',
+            appSubtitle: process.env.DOCSHARE_APP_SUBTITLE || 'Letter Management System',
+            appBranch: process.env.DOCSHARE_APP_BRANCH || 'Office Branch',
+            copyrightText: process.env.DOCSHARE_COPYRIGHT_TEXT || '2026 Office',
+            driveUrl: process.env.DOCSHARE_DRIVE_URL || '',
+            gasWebAppUrl: process.env.DOCSHARE_GAS_WEB_APP_URL || '',
+            localStorageKey: process.env.DOCSHARE_LOCAL_STORAGE_KEY || 'docshare_lms_v1',
+            sessionStorageKey: process.env.DOCSHARE_SESSION_STORAGE_KEY || 'docshare_sess_v1',
+            outgoingFrom: process.env.DOCSHARE_OUTGOING_FROM || 'Docshare Office',
+            refPrefix: process.env.DOCSHARE_REF_PREFIX || 'DOCSHARE',
+          };
+          fs.writeFileSync('apps/frontend/config.js', `window.DOCSHARE_CONFIG = ${JSON.stringify(config, null, 2)};\n`);
+          NODE
+
       - name: Deploy frontend
         uses: peaceiris/actions-gh-pages@v3
         with:

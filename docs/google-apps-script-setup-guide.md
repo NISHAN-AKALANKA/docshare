@@ -16,7 +16,35 @@ This deployment uses:
 
 In Apps Script, open **Project Settings** and enable **Show "appsscript.json" manifest file in editor** if the manifest is hidden.
 
-## 2. Initialize Sheets And Drive
+## 2. Optional Apps Script Configuration
+
+The Apps Script has safe defaults, but a copied deployment can override names with Script Properties before running `initSystem`.
+
+In Apps Script, open **Project Settings > Script properties** and add any values you want to customize:
+
+```text
+DOCSHARE_WORKSPACE_FOLDER_NAME
+DOCSHARE_SPREADSHEET_NAME
+DOCSHARE_ATTACHMENTS_FOLDER_NAME
+DOCSHARE_INCOMING_FOLDER_NAME
+DOCSHARE_OUTGOING_FOLDER_NAME
+```
+
+If these are not set, the defaults in `apps/apps-script/Code.js` are used.
+
+By default, Apps Script creates this Drive structure automatically:
+
+```text
+Docshare/
+  Docshare Letter Management
+  Attachments/
+    Incoming Letters/
+    Outgoing Letters/
+```
+
+If you already had older folders from a previous deployment, running `initSystem` keeps the stored IDs and moves those folders into the workspace where possible.
+
+## 3. Initialize Sheets And Drive
 
 In the Apps Script editor, select the function:
 
@@ -28,8 +56,9 @@ Run it once.
 
 Google will ask for permissions. Approve them. This creates:
 
-- a Google Sheet named `Docshare Letter Management`
-- a Drive folder named `Docshare Attachments`
+- a workspace Drive folder named `Docshare`
+- a Google Sheet named `Docshare Letter Management` inside that workspace
+- an `Attachments` folder inside that workspace
 - child folders for incoming and outgoing attachments
 
 The Sheet uses these tabs:
@@ -47,7 +76,7 @@ The ERD is available at:
 docs/erd.md
 ```
 
-## 3. Deploy The API
+## 4. Deploy The API
 
 In Apps Script:
 
@@ -58,29 +87,64 @@ In Apps Script:
 5. Deploy
 6. Copy the Web App URL ending in `/exec`
 
-## 4. Configure The Frontend
+## 5. Configure The Frontend
 
 Open:
 
 ```text
-apps/frontend/index.html
+apps/frontend/config.js
 ```
 
-Set:
+Set values for the deployment:
 
 ```js
-const GAS_WEB_APP_URL="YOUR_APPS_SCRIPT_WEB_APP_URL";
+window.DOCSHARE_CONFIG = {
+  appTitle: 'Your Office Name',
+  appSubtitle: 'Letter Management System',
+  appBranch: 'Office Branch',
+  copyrightText: '2026 Office',
+  driveUrl: '',
+  gasWebAppUrl: 'YOUR_APPS_SCRIPT_WEB_APP_URL',
+  localStorageKey: 'your_office_lms_v1',
+  sessionStorageKey: 'your_office_sess_v1',
+  outgoingFrom: 'Your Office Name',
+  refPrefix: 'YOUR_REF_PREFIX',
+};
 ```
+
+`driveUrl` can be left blank. After the API initializes, the frontend will use the workspace folder created by Apps Script for the Drive button. Set it only if you want the button to open a specific folder.
 
 Commit and push:
 
 ```bash
-git add apps/frontend/index.html
-git commit -m "Configure Apps Script API URL"
+git add apps/frontend/config.js
+git commit -m "Configure runtime app settings"
 git push
 ```
 
-## 5. Enable GitHub Pages
+For GitHub Actions deployments, you can set repository variables instead of editing `config.js` manually:
+
+```text
+DOCSHARE_APP_TITLE
+DOCSHARE_APP_SUBTITLE
+DOCSHARE_APP_BRANCH
+DOCSHARE_COPYRIGHT_TEXT
+DOCSHARE_DRIVE_URL
+DOCSHARE_GAS_WEB_APP_URL
+DOCSHARE_LOCAL_STORAGE_KEY
+DOCSHARE_SESSION_STORAGE_KEY
+DOCSHARE_OUTGOING_FROM
+DOCSHARE_REF_PREFIX
+PAGES_BASE_URL
+```
+
+`PAGES_BASE_URL` is only used by the pull request preview workflow, for example:
+
+```text
+OWNER.github.io/REPOSITORY
+```
+
+## 6. Enable GitHub Pages
 
 In the GitHub repository:
 
@@ -95,7 +159,7 @@ Letter data is stored in the Google Sheet using proper table tabs.
 
 Attachments are uploaded into Google Drive and the Sheet stores the Drive file ID and link.
 
-The upload forms allow manual reference numbers. If the reference field is left blank, the app generates the normal `DEO_Batt_...` reference.
+The upload forms allow manual reference numbers. If the reference field is left blank, the app generates a reference using `refPrefix` from `apps/frontend/config.js`.
 
 ## Safe Schema Updates
 

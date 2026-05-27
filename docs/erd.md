@@ -88,7 +88,7 @@ The `ref` field is the office/document reference shown in the app.
 When uploading an incoming or outgoing letter:
 
 - enter an existing manual reference if the document already has one
-- leave it blank to use the generated reference, such as `DEO_Batt_26_05_26_In_01`
+- leave it blank to use a generated reference based on the configured `refPrefix`, such as `DOCSHARE_26_05_26_In_01`
 
 ## Attachments
 
