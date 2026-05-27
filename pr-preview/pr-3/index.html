@@ -290,16 +290,19 @@ function Toast({message,onClose}){
 }
 function useFiles(){
   const [files,setFiles]=useState([]);
+  const [reading,setReading]=useState(false);
   const h=e=>{
     const picked=Array.from(e.target.files||[]);
-    if(!picked.length){setFiles([]);return;}
-    Promise.all(picked.map(file=>new Promise(resolve=>{
+    if(!picked.length){setFiles([]);setReading(false);return;}
+    setReading(true);
+    Promise.all(picked.map(file=>new Promise((resolve,reject)=>{
       const r=new FileReader();
       r.onload=ev=>resolve({fd:ev.target.result.split(',')[1],fn:file.name,ft:file.type});
+      r.onerror=()=>reject(new Error(`Could not read ${file.name}`));
       r.readAsDataURL(file);
-    }))).then(setFiles);
+    }))).then(setFiles).catch(error=>{setFiles([]);alert(error.message||'Could not read selected files.');}).finally(()=>setReading(false));
   };
-  return [files,setFiles,h];
+  return [files,setFiles,h,reading];
 }
 
 function LoginPage({onLogin}){
@@ -384,16 +387,17 @@ function SCard({label,value,color,onClick}){
 
 function UpInForm({user,onClose,state,onSave}){
   const [f,sf]=useState({ref:'',dr:'',from:'',fromO:'',to:'',toO:'',subj:'',desc:'',asgn:[]});
-  const [files,,hf]=useFiles();
+  const [files,,hf,readingFiles]=useFiles();
   const set=(k,v)=>sf(x=>({...x,[k]:v}));
   const tog=u=>sf(x=>({...x,asgn:x.asgn.includes(u)?x.asgn.filter(a=>a!==u):[...x.asgn,u]}));
   const sub=()=>{
+    if(readingFiles){alert('Please wait until the selected files finish loading.');return;}
     if(!f.dr||!f.from||!f.subj){alert('Fill required fields.');return;}
     const ref=f.ref.trim()||mkRef('In',state.inC);
     const frm=f.from==='Others'?f.fromO:f.from;
     const to=f.to==='Others'?f.toO:f.to;
     const asgn=f.asgn.map(u=>({u,d:USERS.find(x=>x.u===u).d,s:'pending',seen:null}));
-    onSave({id:crypto.randomUUID(),ref,dr:f.dr,du:new Date().toISOString(),by:user.u,from:frm,to:to||'DE',subj:f.subj,desc:f.desc,attachments:files,asgn,status:user.r==='DE'?'de_reviewed':'pending_de',note:''});
+    onSave({id:crypto.randomUUID(),ref,dr:f.dr,du:new Date().toISOString(),by:user.u,from:frm,to:to||'DE',subj:f.subj,desc:f.desc,attachments:files,fd:files[0]?.fd,fn:files[0]?.fn,ft:files[0]?.ft,asgn,status:user.r==='DE'?'de_reviewed':'pending_de',note:''});
     onClose();
   };
   return <div>
@@ -411,7 +415,7 @@ function UpInForm({user,onClose,state,onSave}){
       <div className="fg" style={{gridColumn:'span 2'}}><label className="flb">Subject *</label><input className="fi" value={f.subj} onChange={e=>set('subj',e.target.value)}/></div>
     </div>
     <div className="fg"><label className="flb">Description</label><textarea className="fi" style={{height:65,resize:'vertical'}} value={f.desc} onChange={e=>set('desc',e.target.value)}/></div>
-    <div className="fg"><label className="flb">Attach Files</label><input type="file" multiple onChange={hf} accept="image/*,.pdf,.doc,.docx" style={{marginTop:4}}/>{files.length>0&&<div style={{fontSize:12,color:'#27ae60',marginTop:4}}>✅ {files.length} file{files.length!==1?'s':''} selected</div>}</div>
+    <div className="fg"><label className="flb">Attach Files</label><input type="file" multiple onChange={hf} accept="image/*,.pdf,.doc,.docx" style={{marginTop:4}}/>{readingFiles&&<div style={{fontSize:12,color:'#e67e22',marginTop:4}}>Loading selected files...</div>}{files.length>0&&<div style={{fontSize:12,color:'#27ae60',marginTop:4}}>✅ {files.length} file{files.length!==1?'s':''} selected</div>}</div>
     {files.length>0&&<AttachmentsView letter={{attachments:files}}/>}
     {user.r==='DE'&&<div className="fg"><label className="flb">Assign To</label>
       <div style={{display:'flex',flexWrap:'wrap',marginTop:5}}>
@@ -420,19 +424,20 @@ function UpInForm({user,onClose,state,onSave}){
     </div>}
     <div className="fr" style={{justifyContent:'flex-end',marginTop:6}}>
       <button className="btn bs" onClick={onClose}>Cancel</button>
-      <button className="btn bp" onClick={sub}>Upload Letter</button>
+      <button className="btn bp" onClick={sub} disabled={readingFiles}>{readingFiles?'Loading Files...':'Upload Letter'}</button>
     </div>
   </div>;
 }
 
 function UpOutForm({user,onClose,state,onSave}){
   const [f,sf]=useState({ref:'',ds:'',subj:'',to:'',toO:'',desc:''});
-  const [files,,hf]=useFiles();
+  const [files,,hf,readingFiles]=useFiles();
   const set=(k,v)=>sf(x=>({...x,[k]:v}));
   const sub=()=>{
+    if(readingFiles){alert('Please wait until the selected files finish loading.');return;}
     if(!f.ds||!f.subj||!f.to){alert('Fill required fields.');return;}
     const ref=f.ref.trim()||mkRef('Out',state.outC);
-    onSave({id:crypto.randomUUID(),ref,ds:f.ds,du:new Date().toISOString(),by:user.u,from:'DE Battaramulla',to:f.to==='Others'?f.toO:f.to,subj:f.subj,desc:f.desc,attachments:files});
+    onSave({id:crypto.randomUUID(),ref,ds:f.ds,du:new Date().toISOString(),by:user.u,from:'DE Battaramulla',to:f.to==='Others'?f.toO:f.to,subj:f.subj,desc:f.desc,attachments:files,fd:files[0]?.fd,fn:files[0]?.fn,ft:files[0]?.ft});
     onClose();
   };
   return <div>
@@ -447,11 +452,11 @@ function UpOutForm({user,onClose,state,onSave}){
       <div className="fg" style={{gridColumn:'span 2'}}><label className="flb">Subject *</label><input className="fi" value={f.subj} onChange={e=>set('subj',e.target.value)}/></div>
     </div>
     <div className="fg"><label className="flb">Description</label><textarea className="fi" style={{height:65,resize:'vertical'}} value={f.desc} onChange={e=>set('desc',e.target.value)}/></div>
-    <div className="fg"><label className="flb">Attach Files</label><input type="file" multiple onChange={hf} accept="image/*,.pdf,.doc,.docx" style={{marginTop:4}}/>{files.length>0&&<div style={{fontSize:12,color:'#27ae60',marginTop:4}}>✅ {files.length} file{files.length!==1?'s':''} selected</div>}</div>
+    <div className="fg"><label className="flb">Attach Files</label><input type="file" multiple onChange={hf} accept="image/*,.pdf,.doc,.docx" style={{marginTop:4}}/>{readingFiles&&<div style={{fontSize:12,color:'#e67e22',marginTop:4}}>Loading selected files...</div>}{files.length>0&&<div style={{fontSize:12,color:'#27ae60',marginTop:4}}>✅ {files.length} file{files.length!==1?'s':''} selected</div>}</div>
     {files.length>0&&<AttachmentsView letter={{attachments:files}}/>}
     <div className="fr" style={{justifyContent:'flex-end'}}>
       <button className="btn bs" onClick={onClose}>Cancel</button>
-      <button className="btn bp" onClick={sub}>Upload Out Letter</button>
+      <button className="btn bp" onClick={sub} disabled={readingFiles}>{readingFiles?'Loading Files...':'Upload Out Letter'}</button>
     </div>
   </div>;
 }
