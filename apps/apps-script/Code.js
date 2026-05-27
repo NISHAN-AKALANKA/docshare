@@ -3,6 +3,7 @@ const CONFIG = {
   driveFolderName: 'Docshare Attachments',
   incomingFolderName: 'Incoming Letters',
   outgoingFolderName: 'Outgoing Letters',
+  version: 'multiple-attachments-v1',
 };
 
 const SHEETS = {
@@ -90,6 +91,7 @@ function doPost(e) {
     if (action === 'getFileData') return json_(getFileData_(payload.fileId));
     if (action === 'saveState') return json_(saveState_(payload.state));
     if (action === 'markNotificationsRead') return json_(markNotificationsRead_(payload.username));
+    if (action === 'version') return json_({ ok: true, version: CONFIG.version });
 
     return json_({ ok: false, error: 'Unknown action' });
   } catch (error) {
@@ -98,7 +100,7 @@ function doPost(e) {
 }
 
 function doGet() {
-  return json_({ ok: true, service: 'docshare-apps-script-api' });
+  return json_({ ok: true, service: 'docshare-apps-script-api', version: CONFIG.version });
 }
 
 function login_(username, password) {
