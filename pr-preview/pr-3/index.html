@@ -138,20 +138,28 @@ function driveFileId(fileId,fileUrl){
   const m=String(fileUrl||'').match(/\/d\/([^/]+)/);
   return m?m[1]:'';
 }
-function docPrintSrc(letter){
-  if(!letter)return '';
-  const id=driveFileId(letter.fileId,letter.fileUrl);
+function attachmentsOf(letter){
+  if(!letter)return [];
+  const items=Array.isArray(letter.attachments)?letter.attachments.filter(a=>a&&(a.fileId||a.fileUrl||a.fd||a.fn)):[];
+  if(items.length)return items;
+  return (letter.fileId||letter.fileUrl||letter.fd||letter.fn)?[{fileId:letter.fileId,fn:letter.fn,ft:letter.ft,fileUrl:letter.fileUrl,fd:letter.fd}]:[];
+}
+function firstAttachment(letter){return attachmentsOf(letter)[0]||null;}
+function attachmentDoc(letter,attachment){return {...(letter||{}),...(attachment||{})};}
+function docPrintSrc(item){
+  if(!item)return '';
+  const id=driveFileId(item.fileId,item.fileUrl);
   if(id)return `https://drive.google.com/file/d/${id}/preview`;
-  if(letter.fileUrl)return letter.fileUrl;
-  if(letter.fd)return `data:${letter.ft||'application/octet-stream'};base64,${letter.fd}`;
+  if(item.fileUrl)return item.fileUrl;
+  if(item.fd)return `data:${item.ft||'application/octet-stream'};base64,${item.fd}`;
   return '';
 }
-function imagePrintSrc(letter){
-  if(!letter)return '';
-  if(letter.fd)return `data:${letter.ft||'image/*'};base64,${letter.fd}`;
-  const id=driveFileId(letter.fileId,letter.fileUrl);
+function imagePrintSrc(item){
+  if(!item)return '';
+  if(item.fd)return `data:${item.ft||'image/*'};base64,${item.fd}`;
+  const id=driveFileId(item.fileId,item.fileUrl);
   if(id)return `https://drive.google.com/uc?export=view&id=${id}`;
-  return letter.fileUrl||'';
+  return item.fileUrl||'';
 }
 function escHtml(v){
   return String(v||'').replace(/[&<>"']/g,ch=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[ch]));
@@ -168,11 +176,12 @@ function b64BlobUrl(data,type){
   return URL.createObjectURL(new Blob(chunks,{type:type||'application/octet-stream'}));
 }
 async function printDocument(letter){
-  const src=docPrintSrc(letter);
+  const item=attachmentDoc(letter,firstAttachment(letter)||letter);
+  const src=docPrintSrc(item);
   if(!src){alert('No attached document is available for this report item.');return;}
   const win=window.open('', '_blank', 'width=980,height=720');
   if(!win){alert('Allow pop-ups to print the attached document.');return;}
-  const title=escHtml(letter.fn||letter.ref||'Document');
+  const title=escHtml(item.fn||letter.ref||'Document');
   const safeSrc=escHtml(src);
   const printScript=`<script>function p(){setTimeout(function(){window.focus();window.print();},350)}window.onafterprint=function(){setTimeout(function(){window.close()},250)}<\/script>`;
   const renderImage=imgSrc=>{
@@ -181,14 +190,14 @@ async function printDocument(letter){
     win.document.write(`<!doctype html><html><head><title>${title}</title><style>@page{margin:0}html,body{margin:0;width:100%;min-height:100%;background:#fff}.sheet{min-height:100vh;display:flex;align-items:center;justify-content:center}img{display:block;max-width:100%;max-height:100vh;width:auto;height:auto}</style>${printScript}</head><body><div class="sheet"><img src="${safeImgSrc}" alt="${title}" onload="p()" onerror="document.body.textContent='Could not load image for printing.'"></div></body></html>`);
     win.document.close();
   };
-  if((letter.ft||'').startsWith('image/')){
+  if((item.ft||'').startsWith('image/')){
     win.document.write(`<!doctype html><html><head><title>${title}</title></head><body style="font-family:Arial,sans-serif;padding:18px">Loading image...</body></html>`);
     win.document.close();
-    if(letter.fd){renderImage(imagePrintSrc(letter));return;}
+    if(item.fd){renderImage(imagePrintSrc(item));return;}
     try{
-      const data=await api('getFileData',{fileId:letter.fileId});
+      const data=await api('getFileData',{fileId:item.fileId});
       if(data.ok===false)throw new Error(data.error||'Could not load image.');
-      renderImage(`data:${data.fileType||letter.ft||'image/jpeg'};base64,${data.data}`);
+      renderImage(`data:${data.fileType||item.ft||'image/jpeg'};base64,${data.data}`);
     }catch(error){
       win.document.open();
       win.document.write(`<!doctype html><html><body style="font-family:Arial,sans-serif;padding:18px">Could not load image for printing.<br>${escHtml(error.message||'')}</body></html>`);
@@ -196,15 +205,15 @@ async function printDocument(letter){
     }
     return;
   }
-  if((letter.ft||'')==='application/pdf'){
+  if((item.ft||'')==='application/pdf'){
     win.document.write(`<!doctype html><html><head><title>${title}</title></head><body style="font-family:Arial,sans-serif;padding:18px">Loading PDF...</body></html>`);
     win.document.close();
     try{
-      const data=letter.fd
-        ?{fileType:letter.ft,data:letter.fd}
-        :await api('getFileData',{fileId:letter.fileId});
+      const data=item.fd
+        ?{fileType:item.ft,data:item.fd}
+        :await api('getFileData',{fileId:item.fileId});
       if(data.ok===false)throw new Error(data.error||'Could not load PDF.');
-      const blobUrl=b64BlobUrl(data.data,data.fileType||letter.ft||'application/pdf');
+      const blobUrl=b64BlobUrl(data.data,data.fileType||item.ft||'application/pdf');
       win.location.href=blobUrl;
       setTimeout(()=>{
         try{win.focus();win.print();}
@@ -260,15 +269,37 @@ function FView({fd:fdata,fn,ft,fileUrl,fileId}){
     </div>
   </div>;
 }
+function AttachmentsView({letter,printable=false}){
+  const files=attachmentsOf(letter);
+  if(!files.length)return null;
+  return <div style={{marginTop:11}}>
+    {files.length>1&&<div style={{fontWeight:700,color:'#003580',marginBottom:8,fontSize:13}}>📎 Attachments ({files.length})</div>}
+    {files.map((file,index)=><div key={`${file.fileId||file.fn||'file'}-${index}`} style={{marginBottom:12}}>
+      {files.length>1&&<div className="fr" style={{justifyContent:'space-between',marginBottom:5}}>
+        <span style={{fontSize:12,fontWeight:700,color:'#555'}}>Attachment {index+1}: {file.fn||'Document'}</span>
+        {printable&&<button className="btn bp bsm" onClick={()=>printDocument(attachmentDoc(letter,file))}>🖨 Print</button>}
+      </div>}
+      <FView fd={file.fd} fn={file.fn} ft={file.ft} fileUrl={file.fileUrl} fileId={file.fileId}/>
+    </div>)}
+  </div>;
+}
 function Toast({message,onClose}){
   useEffect(()=>{if(!message)return;const t=setTimeout(onClose,3200);return()=>clearTimeout(t);},[message]);
   if(!message)return null;
   return <div className="toast">{message}</div>;
 }
-function useFile(){
-  const [f,sf]=useState(null);
-  const h=e=>{const fl=e.target.files?.[0];if(!fl)return;const r=new FileReader();r.onload=ev=>sf({data:ev.target.result.split(',')[1],name:fl.name,type:fl.type});r.readAsDataURL(fl);};
-  return [f,sf,h];
+function useFiles(){
+  const [files,setFiles]=useState([]);
+  const h=e=>{
+    const picked=Array.from(e.target.files||[]);
+    if(!picked.length){setFiles([]);return;}
+    Promise.all(picked.map(file=>new Promise(resolve=>{
+      const r=new FileReader();
+      r.onload=ev=>resolve({fd:ev.target.result.split(',')[1],fn:file.name,ft:file.type});
+      r.readAsDataURL(file);
+    }))).then(setFiles);
+  };
+  return [files,setFiles,h];
 }
 
 function LoginPage({onLogin}){
@@ -353,7 +384,7 @@ function SCard({label,value,color,onClick}){
 
 function UpInForm({user,onClose,state,onSave}){
   const [f,sf]=useState({ref:'',dr:'',from:'',fromO:'',to:'',toO:'',subj:'',desc:'',asgn:[]});
-  const [fl,,hf]=useFile();
+  const [files,,hf]=useFiles();
   const set=(k,v)=>sf(x=>({...x,[k]:v}));
   const tog=u=>sf(x=>({...x,asgn:x.asgn.includes(u)?x.asgn.filter(a=>a!==u):[...x.asgn,u]}));
   const sub=()=>{
@@ -362,7 +393,7 @@ function UpInForm({user,onClose,state,onSave}){
     const frm=f.from==='Others'?f.fromO:f.from;
     const to=f.to==='Others'?f.toO:f.to;
     const asgn=f.asgn.map(u=>({u,d:USERS.find(x=>x.u===u).d,s:'pending',seen:null}));
-    onSave({id:crypto.randomUUID(),ref,dr:f.dr,du:new Date().toISOString(),by:user.u,from:frm,to:to||'DE',subj:f.subj,desc:f.desc,fd:fl?.data,fn:fl?.name,ft:fl?.type,asgn,status:user.r==='DE'?'de_reviewed':'pending_de',note:''});
+    onSave({id:crypto.randomUUID(),ref,dr:f.dr,du:new Date().toISOString(),by:user.u,from:frm,to:to||'DE',subj:f.subj,desc:f.desc,attachments:files,asgn,status:user.r==='DE'?'de_reviewed':'pending_de',note:''});
     onClose();
   };
   return <div>
@@ -380,8 +411,8 @@ function UpInForm({user,onClose,state,onSave}){
       <div className="fg" style={{gridColumn:'span 2'}}><label className="flb">Subject *</label><input className="fi" value={f.subj} onChange={e=>set('subj',e.target.value)}/></div>
     </div>
     <div className="fg"><label className="flb">Description</label><textarea className="fi" style={{height:65,resize:'vertical'}} value={f.desc} onChange={e=>set('desc',e.target.value)}/></div>
-    <div className="fg"><label className="flb">Attach File</label><input type="file" onChange={hf} accept="image/*,.pdf,.doc,.docx" style={{marginTop:4}}/>{fl&&<div style={{fontSize:12,color:'#27ae60',marginTop:4}}>✅ {fl.name}</div>}</div>
-    {fl&&<FView fd={fl.data} fn={fl.name} ft={fl.type}/>}
+    <div className="fg"><label className="flb">Attach Files</label><input type="file" multiple onChange={hf} accept="image/*,.pdf,.doc,.docx" style={{marginTop:4}}/>{files.length>0&&<div style={{fontSize:12,color:'#27ae60',marginTop:4}}>✅ {files.length} file{files.length!==1?'s':''} selected</div>}</div>
+    {files.length>0&&<AttachmentsView letter={{attachments:files}}/>}
     {user.r==='DE'&&<div className="fg"><label className="flb">Assign To</label>
       <div style={{display:'flex',flexWrap:'wrap',marginTop:5}}>
         {ASSIGNABLE.map(a=><label key={a.u} className={`at${f.asgn.includes(a.u)?' sel':''}`}><input type="checkbox" checked={f.asgn.includes(a.u)} onChange={()=>tog(a.u)} style={{margin:0}}/> {a.d}</label>)}
@@ -396,12 +427,12 @@ function UpInForm({user,onClose,state,onSave}){
 
 function UpOutForm({user,onClose,state,onSave}){
   const [f,sf]=useState({ref:'',ds:'',subj:'',to:'',toO:'',desc:''});
-  const [fl,,hf]=useFile();
+  const [files,,hf]=useFiles();
   const set=(k,v)=>sf(x=>({...x,[k]:v}));
   const sub=()=>{
     if(!f.ds||!f.subj||!f.to){alert('Fill required fields.');return;}
     const ref=f.ref.trim()||mkRef('Out',state.outC);
-    onSave({id:crypto.randomUUID(),ref,ds:f.ds,du:new Date().toISOString(),by:user.u,from:'DE Battaramulla',to:f.to==='Others'?f.toO:f.to,subj:f.subj,desc:f.desc,fd:fl?.data,fn:fl?.name,ft:fl?.type});
+    onSave({id:crypto.randomUUID(),ref,ds:f.ds,du:new Date().toISOString(),by:user.u,from:'DE Battaramulla',to:f.to==='Others'?f.toO:f.to,subj:f.subj,desc:f.desc,attachments:files});
     onClose();
   };
   return <div>
@@ -416,8 +447,8 @@ function UpOutForm({user,onClose,state,onSave}){
       <div className="fg" style={{gridColumn:'span 2'}}><label className="flb">Subject *</label><input className="fi" value={f.subj} onChange={e=>set('subj',e.target.value)}/></div>
     </div>
     <div className="fg"><label className="flb">Description</label><textarea className="fi" style={{height:65,resize:'vertical'}} value={f.desc} onChange={e=>set('desc',e.target.value)}/></div>
-    <div className="fg"><label className="flb">Attach File</label><input type="file" onChange={hf} accept="image/*,.pdf,.doc,.docx" style={{marginTop:4}}/>{fl&&<div style={{fontSize:12,color:'#27ae60',marginTop:4}}>✅ {fl.name}</div>}</div>
-    {fl&&<FView fd={fl.data} fn={fl.name} ft={fl.type}/>}
+    <div className="fg"><label className="flb">Attach Files</label><input type="file" multiple onChange={hf} accept="image/*,.pdf,.doc,.docx" style={{marginTop:4}}/>{files.length>0&&<div style={{fontSize:12,color:'#27ae60',marginTop:4}}>✅ {files.length} file{files.length!==1?'s':''} selected</div>}</div>
+    {files.length>0&&<AttachmentsView letter={{attachments:files}}/>}
     <div className="fr" style={{justifyContent:'flex-end'}}>
       <button className="btn bs" onClick={onClose}>Cancel</button>
       <button className="btn bp" onClick={sub}>Upload Out Letter</button>
@@ -467,7 +498,7 @@ function InModal({letter,user,onClose,onUpdate}){
     </div>
     <Fld l="Subject" v={letter.subj}/>
     {letter.desc&&<Fld l="Description" v={letter.desc}/>}
-    <FView fd={letter.fd} fn={letter.fn} ft={letter.ft} fileUrl={letter.fileUrl} fileId={letter.fileId}/>
+    <AttachmentsView letter={letter}/>
 
     {(isDE||letter.note)&&<div className="na">
       <div style={{fontWeight:700,color:'#003580',marginBottom:7,fontSize:13}}>📝 DE Note / Instructions</div>
@@ -531,12 +562,12 @@ function OutModal({letter,onClose}){
     </div>
     <Fld l="Subject" v={letter.subj}/>
     {letter.desc&&<Fld l="Description" v={letter.desc}/>}
-    <FView fd={letter.fd} fn={letter.fn} ft={letter.ft} fileUrl={letter.fileUrl} fileId={letter.fileId}/>
+    <AttachmentsView letter={letter}/>
   </Mod>;
 }
 
 function ReportModal({letter,onClose}){
-  const hasDoc=!!docPrintSrc(letter);
+  const hasDoc=!!docPrintSrc(attachmentDoc(letter,firstAttachment(letter)));
   return <Mod title={`📊 ${letter.ref}`} onClose={onClose}>
     <div className="g2">
       <Fld l="Reference No" v={letter.ref}/><Fld l="Date Received" v={fd(letter.dr)}/>
@@ -560,7 +591,7 @@ function ReportModal({letter,onClose}){
     <div className="fr" style={{justifyContent:'flex-end',marginTop:14}}>
       <button className="btn bp" onClick={()=>printDocument(letter)} disabled={!hasDoc} style={!hasDoc?{opacity:.45,cursor:'not-allowed'}:null}>🖨 Print Document</button>
     </div>
-    {hasDoc?<FView fd={letter.fd} fn={letter.fn} ft={letter.ft} fileUrl={letter.fileUrl} fileId={letter.fileId}/>:<div className="ab aw" style={{marginTop:12}}>No attached document is available for this report item.</div>}
+    {hasDoc?<AttachmentsView letter={letter} printable={true}/>:<div className="ab aw" style={{marginTop:12}}>No attached document is available for this report item.</div>}
   </Mod>;
 }
 
