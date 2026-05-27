@@ -8,8 +8,8 @@ const CONFIG = {
 const SHEETS = {
   settings: ['key', 'value'],
   users: ['username', 'password', 'displayName', 'role', 'active'],
-  incoming: ['id', 'ref', 'dr', 'du', 'by', 'from', 'to', 'subj', 'desc', 'fileId', 'fileName', 'fileType', 'fileUrl', 'status', 'note', 'deAt'],
-  outgoing: ['id', 'ref', 'ds', 'du', 'by', 'from', 'to', 'subj', 'desc', 'fileId', 'fileName', 'fileType', 'fileUrl'],
+  incoming: ['id', 'ref', 'dr', 'du', 'by', 'from', 'to', 'subj', 'desc', 'fileId', 'fileName', 'fileType', 'fileUrl', 'attachments', 'status', 'note', 'deAt'],
+  outgoing: ['id', 'ref', 'ds', 'du', 'by', 'from', 'to', 'subj', 'desc', 'fileId', 'fileName', 'fileType', 'fileUrl', 'attachments'],
   assignments: ['letterId', 'username', 'displayName', 'status', 'seen'],
   notifications: ['id', 'username', 'title', 'message', 'letterId', 'ref', 'type', 'read', 'createdAt'],
 };
@@ -20,12 +20,14 @@ const SHEET_ALIASES = {
     desc: ['description', 'Description'],
     dr: ['dateReceived', 'Date Received'],
     du: ['dateUploaded', 'Date Uploaded'],
+    attachments: ['files', 'Attachments'],
   },
   outgoing: {
     subj: ['subject', 'Subject'],
     desc: ['description', 'Description'],
     ds: ['dateSent', 'Date Sent'],
     du: ['dateUploaded', 'Date Uploaded'],
+    attachments: ['files', 'Attachments'],
   },
   users: {
     username: ['user', 'userName', 'Username'],
@@ -142,6 +144,7 @@ function readState_() {
     fn: row.fileName,
     ft: row.fileType,
     fileUrl: row.fileUrl,
+    attachments: parseAttachments_(row),
     asgn: asgnByLetter[row.id] || [],
     status: row.status || 'pending_de',
     note: row.note || '',
@@ -162,6 +165,7 @@ function readState_() {
     fn: row.fileName,
     ft: row.fileType,
     fileUrl: row.fileUrl,
+    attachments: parseAttachments_(row),
   }));
 
   return {
@@ -218,6 +222,7 @@ function saveState_(state) {
     fileName: letter.fn,
     fileType: letter.ft,
     fileUrl: letter.fileUrl,
+    attachments: JSON.stringify(letter.attachments || []),
     status: letter.status,
     note: letter.note,
     deAt: letter.deAt,
@@ -237,6 +242,7 @@ function saveState_(state) {
     fileName: letter.fn,
     fileType: letter.ft,
     fileUrl: letter.fileUrl,
+    attachments: JSON.stringify(letter.attachments || []),
   })));
 
   writeRows_(ss.getSheetByName('assignments'), assignments);
@@ -320,58 +326,107 @@ function notification_(username, title, message, letter, type) {
 }
 
 function normalizeIncoming_(letter) {
-  const file = ensureFile_(letter, 'incoming');
+  const attachments = ensureAttachments_(letter, 'incoming');
+  const file = attachments[0] || {};
   return {
     ...letter,
-    fileId: file.fileId,
-    fn: file.fileName,
-    ft: file.fileType,
-    fileUrl: file.fileUrl,
+    attachments,
+    fileId: file.fileId || '',
+    fn: file.fn || '',
+    ft: file.ft || '',
+    fileUrl: file.fileUrl || '',
     fd: '',
   };
 }
 
 function normalizeOutgoing_(letter) {
-  const file = ensureFile_(letter, 'outgoing');
+  const attachments = ensureAttachments_(letter, 'outgoing');
+  const file = attachments[0] || {};
   return {
     ...letter,
-    fileId: file.fileId,
-    fn: file.fileName,
-    ft: file.fileType,
-    fileUrl: file.fileUrl,
+    attachments,
+    fileId: file.fileId || '',
+    fn: file.fn || '',
+    ft: file.ft || '',
+    fileUrl: file.fileUrl || '',
     fd: '',
   };
 }
 
-function ensureFile_(letter, type) {
-  if (letter.fileId) {
+function ensureAttachments_(letter, type) {
+  const source = Array.isArray(letter.attachments) && letter.attachments.length
+    ? letter.attachments
+    : legacyAttachments_(letter);
+  return source.map(file => ensureAttachment_(file, type)).filter(file => file.fileId || file.fn || file.fileUrl);
+}
+
+function legacyAttachments_(letter) {
+  if (!letter.fileId && !letter.fileUrl && !letter.fd && !letter.fn) return [];
+  return [{
+    fileId: letter.fileId || '',
+    fn: letter.fn || '',
+    ft: letter.ft || '',
+    fileUrl: letter.fileUrl || '',
+    fd: letter.fd || '',
+  }];
+}
+
+function ensureAttachment_(file, type) {
+  if (file.fileId) {
     return {
-      fileId: letter.fileId,
-      fileName: letter.fn || '',
-      fileType: letter.ft || '',
-      fileUrl: letter.fileUrl || driveFileUrl_(letter.fileId),
+      fileId: file.fileId,
+      fn: file.fn || file.fileName || '',
+      ft: file.ft || file.fileType || '',
+      fileUrl: file.fileUrl || driveFileUrl_(file.fileId),
     };
   }
 
-  if (!letter.fd || !letter.fn) {
+  if (!file.fd || !file.fn) {
     return {
       fileId: '',
-      fileName: letter.fn || '',
-      fileType: letter.ft || '',
-      fileUrl: letter.fileUrl || '',
+      fn: file.fn || '',
+      ft: file.ft || '',
+      fileUrl: file.fileUrl || '',
     };
   }
 
   const folder = getAttachmentFolder_(type);
-  const bytes = Utilities.base64Decode(letter.fd);
-  const blob = Utilities.newBlob(bytes, letter.ft || MimeType.BINARY, letter.fn);
-  const file = folder.createFile(blob);
+  const bytes = Utilities.base64Decode(file.fd);
+  const blob = Utilities.newBlob(bytes, file.ft || MimeType.BINARY, file.fn);
+  const uploaded = folder.createFile(blob);
 
   return {
-    fileId: file.getId(),
-    fileName: file.getName(),
-    fileType: letter.ft || file.getMimeType(),
-    fileUrl: driveFileUrl_(file.getId()),
+    fileId: uploaded.getId(),
+    fn: uploaded.getName(),
+    ft: file.ft || uploaded.getMimeType(),
+    fileUrl: driveFileUrl_(uploaded.getId()),
+  };
+}
+
+function parseAttachments_(row) {
+  const raw = String(row.attachments || '').trim();
+  if (raw) {
+    try {
+      const parsed = JSON.parse(raw);
+      if (Array.isArray(parsed)) return parsed.map(normalizeAttachmentMeta_).filter(file => file.fileId || file.fn || file.fileUrl);
+    } catch (error) {
+      // Fall back to legacy single-file columns below.
+    }
+  }
+  return legacyAttachments_({
+    fileId: row.fileId,
+    fn: row.fileName,
+    ft: row.fileType,
+    fileUrl: row.fileUrl,
+  }).map(normalizeAttachmentMeta_);
+}
+
+function normalizeAttachmentMeta_(file) {
+  return {
+    fileId: file.fileId || '',
+    fn: file.fn || file.fileName || '',
+    ft: file.ft || file.fileType || '',
+    fileUrl: file.fileUrl || (file.fileId ? driveFileUrl_(file.fileId) : ''),
   };
 }
 
