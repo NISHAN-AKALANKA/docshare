@@ -156,6 +156,17 @@ function imagePrintSrc(letter){
 function escHtml(v){
   return String(v||'').replace(/[&<>"']/g,ch=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[ch]));
 }
+function b64BlobUrl(data,type){
+  const raw=atob(data);
+  const chunks=[];
+  for(let i=0;i<raw.length;i+=8192){
+    const part=raw.slice(i,i+8192);
+    const bytes=new Uint8Array(part.length);
+    for(let j=0;j<part.length;j++)bytes[j]=part.charCodeAt(j);
+    chunks.push(bytes);
+  }
+  return URL.createObjectURL(new Blob(chunks,{type:type||'application/octet-stream'}));
+}
 async function printDocument(letter){
   const src=docPrintSrc(letter);
   if(!src){alert('No attached document is available for this report item.');return;}
@@ -181,6 +192,32 @@ async function printDocument(letter){
     }catch(error){
       win.document.open();
       win.document.write(`<!doctype html><html><body style="font-family:Arial,sans-serif;padding:18px">Could not load image for printing.<br>${escHtml(error.message||'')}</body></html>`);
+      win.document.close();
+    }
+    return;
+  }
+  if((letter.ft||'')==='application/pdf'){
+    win.document.write(`<!doctype html><html><head><title>${title}</title></head><body style="font-family:Arial,sans-serif;padding:18px">Loading PDF...</body></html>`);
+    win.document.close();
+    try{
+      const data=letter.fd
+        ?{fileType:letter.ft,data:letter.fd}
+        :await api('getFileData',{fileId:letter.fileId});
+      if(data.ok===false)throw new Error(data.error||'Could not load PDF.');
+      const blobUrl=b64BlobUrl(data.data,data.fileType||letter.ft||'application/pdf');
+      win.location.href=blobUrl;
+      setTimeout(()=>{
+        try{win.focus();win.print();}
+        catch(error){
+          win.document.open();
+          win.document.write(`<!doctype html><html><body style="font-family:Arial,sans-serif;padding:18px">Could not open printer for this PDF. Use the PDF viewer print button.</body></html>`);
+          win.document.close();
+        }
+        setTimeout(()=>URL.revokeObjectURL(blobUrl),60000);
+      },2500);
+    }catch(error){
+      win.document.open();
+      win.document.write(`<!doctype html><html><body style="font-family:Arial,sans-serif;padding:18px">Could not load PDF for printing.<br>${escHtml(error.message||'')}</body></html>`);
       win.document.close();
     }
     return;
