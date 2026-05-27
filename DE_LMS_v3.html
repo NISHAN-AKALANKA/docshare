@@ -20,6 +20,7 @@ th{background:#003580;color:#fff;padding:9px 10px;text-align:left;font-size:12px
 td{padding:7px 10px;border-bottom:1px solid #eee;vertical-align:middle}
 tr:nth-child(even){background:#f9f9fb}
 tr:hover td{background:#e8f0fd}
+.trsel td{background:#dbeafe!important}
 .badge{display:inline-block;padding:2px 9px;border-radius:20px;font-size:11px;font-weight:700;color:#fff;white-space:nowrap}
 .fl{font-size:11px;font-weight:700;color:#888;text-transform:uppercase;letter-spacing:.4px;margin-bottom:3px}
 .fv{font-size:13px;color:#333}
@@ -167,7 +168,6 @@ function LoginPage({onLogin}){
   return <div style={{minHeight:'100vh',background:'linear-gradient(135deg,#001f5b,#003580,#005bb5)',display:'flex',flexDirection:'column',alignItems:'center',justifyContent:'center',padding:16}}>
     <div style={{background:'#fff',borderRadius:12,boxShadow:'0 20px 60px rgba(0,0,0,.4)',maxWidth:420,width:'100%',overflow:'hidden'}}>
       <div style={{background:'linear-gradient(135deg,#001f5b,#003580)',padding:'26px 24px 20px',textAlign:'center'}}>
-        <img src={LOGO} alt="WPC Logo" style={{height:72,objectFit:'contain',marginBottom:10,borderRadius:4}}/>
         <div style={{color:'#fff',fontWeight:800,fontSize:16}}>DE Office – Battaramulla</div>
         <div style={{color:'#b3d4ff',fontSize:13,marginTop:3}}>Letter Management System</div>
         <div style={{color:'rgba(255,255,255,.5)',fontSize:11,marginTop:2}}>Western Provincial Council · Engineering Branch</div>
@@ -188,7 +188,6 @@ function TopNav({user,page,setPage,onLogout}){
   const tabs=[{id:'dash',l:'🏠 Dashboard'},{id:'in',l:'📥 In Letters'},...(!['STO','TO'].includes(user.r)?[{id:'out',l:'📤 Out Letters'}]:[]),...(isAdmin?[{id:'rep',l:'📊 Reports'}]:[])];
   return <div style={{background:'linear-gradient(to right,#001f5b,#003580)',boxShadow:'0 2px 10px rgba(0,0,0,.2)',position:'sticky',top:0,zIndex:100}}>
     <div style={{display:'flex',alignItems:'center',padding:'8px 18px',gap:10,borderBottom:'1px solid rgba(255,255,255,.1)'}}>
-      <img src={LOGO} alt="WPC" style={{height:42,objectFit:'contain',flexShrink:0}}/>
       <div style={{flex:1}}>
         <div style={{color:'#fff',fontWeight:800,fontSize:14}}>DE Office – Battaramulla &nbsp;|&nbsp; Letter Management System</div>
         <div style={{color:'rgba(255,255,255,.5)',fontSize:11}}>Western Provincial Council · Engineering Branch</div>
@@ -553,6 +552,7 @@ function OutPage({user,state,onAdd}){
 function RepPage({state}){
   const [pf,setPf]=useState('');const [sf,setSf]=useState('');const [df,setDf]=useState('');const [dt,setDt]=useState('');
   const [sel,setSel]=useState(null);
+  const [viewing,setViewing]=useState(null);
   const {inL,outL}=state;
   let ls=inL;
   if(pf) ls=ls.filter(l=>l.asgn.some(a=>a.u===pf));
@@ -577,15 +577,15 @@ function RepPage({state}){
     <div style={{fontSize:13,fontWeight:700,color:'#003580',marginBottom:7}}>{ls.length} letter{ls.length!==1?'s':''}</div>
     <div className="tw"><table>
       <thead><tr><th>Ref No</th><th>Date</th><th>From</th><th>Subject</th><th>Assignees & Seen</th><th>Status</th><th>DE Note</th><th></th></tr></thead>
-      <tbody>{ls.map(l=><tr key={l.id} onClick={()=>setSel(l)} style={{cursor:'pointer'}}>
+      <tbody>{ls.map(l=><tr key={l.id} className={sel?.id===l.id?'trsel':''} onClick={()=>setSel(l)} style={{cursor:'pointer'}}>
         <td><strong>{l.ref}</strong></td><td>{fd(l.dr)}</td><td>{l.from}</td><td>{l.subj}</td>
         <td style={{fontSize:11}}>{l.asgn.map(a=><div key={a.u} style={{marginBottom:2}}>{a.d}: <Bdg s={a.s}/> <span style={{color:a.seen?'#27ae60':'#e74c3c',fontWeight:600,fontSize:11}}>{a.seen?'👁 Seen':'👁 Unseen'}</span></div>)}</td>
         <td><Bdg s={l.status}/></td>
         <td style={{fontSize:12,color:'#555'}}>{l.note||'-'}</td>
-        <td><button className="btn bp bsm" onClick={e=>{e.stopPropagation();setSel(l);}}>View</button></td>
+        <td><button className="btn bp bsm" onClick={e=>{e.stopPropagation();setSel(l);setViewing(l);}}>View</button></td>
       </tr>)}</tbody>
     </table></div>
-    {sel&&<ReportModal letter={sel} onClose={()=>setSel(null)}/>}
+    {viewing&&<ReportModal letter={viewing} onClose={()=>setViewing(null)}/>}
   </div>;
 }
 
